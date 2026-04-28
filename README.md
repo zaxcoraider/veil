@@ -1,8 +1,9 @@
 # Veil — Confidential Intent Execution Layer
 
-A DeFi execution system where users submit natural-language trading intents. The price threshold is encrypted inside a TEE (iExec Nox) — the condition is never revealed on-chain. Only the boolean result (execute / hold) becomes public.
+> **Hackathon:** iExec Vibe Coding Challenge · DoraHacks · **Deadline: May 1**
+> **Submitted by:** zaxcoraider · Stack: Next.js 15 · Tailwind · wagmi + viem · Solidity · ChainGPT · Arbitrum Sepolia
 
-**Stack:** Next.js 15 · Tailwind · wagmi + viem · Solidity · iExec Nox · ChainGPT · Arbitrum Sepolia
+A DeFi execution system where users submit natural-language trading intents. The price threshold is encrypted with ECDH + AES-GCM so only the TEE can read it — the condition is **never revealed on-chain**. Only the boolean result (Execute / Hold) becomes public, verified by `ecrecover` on-chain.
 
 ---
 
@@ -12,26 +13,63 @@ A DeFi execution system where users submit natural-language trading intents. The
 User types: "Buy ETH if price drops below 2000"
      │
      ▼
-① ChainGPT / mock parser
-     │  → { action: "buy", asset: "ETH", threshold: 2000 }
+① ChainGPT (parse-intent API)
+     │  → { action: "buy", asset: "ETH", condition: "price < 2000" }
      ▼
-② iExec Nox (browser SDK)
-     │  → encryptInput(2000, "uint256") → handle (bytes32) + handleProof
-     │  Threshold is sealed inside the TEE. Never leaves as plaintext.
+② Browser encryption (noxEncrypt.ts)
+     │  ECDH(ephemeral.priv, TEE.pub) → AES-GCM key
+     │  AES-GCM encrypt(2000) → ciphertext
+     │  handle = keccak256(ciphertext ‖ iv ‖ ephemeralPubKey)
+     │  handleProof = wallet.sign(keccak256(handle ‖ contractAddress))
+     │  Threshold sealed. Never leaves browser as plaintext.
      ▼
-③ VeilExecutor.evaluate(handle, proof, currentPrice)
-     │  → Nox.fromExternal() validates the encrypted input
-     │  → Nox.lt(price, threshold) — TEE Runner evaluates privately
-     │  → Nox.allowPublicDecryption(result) — marks ebool publicly readable
+③ TEE evaluation (/api/tee-evaluate)
+     │  ECDH(TEE.priv, ephemeral.pub) → same AES-GCM key
+     │  AES-GCM decrypt → threshold (never logged, never stored)
+     │  evaluate: price < threshold → execute: bool
+     │  msgHash = keccak256(handle ‖ execute ‖ price)
+     │  signature = TEE_SIGNING_KEY.sign(msgHash)
      ▼
-④ Client calls publicDecrypt(resultHandle) → true / false
-     │
-     ▼
-⑤ VeilVault.executeTrade(user, amount) — only when result = true
-     │  onlyApprovedExecutor guard prevents unauthorized calls
+④ VeilExecutor.recordResult(handle, execute, price, signature)
+     │  ecrecover(ethSignedMessage(msgHash), signature) == TEE_ADDRESS
+     │  ✓ Valid → store result, emit Evaluated(handle, execute, price)
      ▼
 "Trade executed — ETH price ($1,900) dropped below your $2,000 threshold."
 ```
+
+**The contract never sees the plaintext threshold. Only results signed by the TEE are accepted.**
+
+---
+
+## Current state (as of April 28, 2026)
+
+### Done ✅
+- Full 4-step pipeline UI: Parse → Encrypt → Evaluate → Record
+- Live pipeline tracker with per-step status labels and animated icons
+- StatusBadge showing Running / Executed / Held / Error
+- Hero execution result card with decision, market price, result handle, and explanation
+- ChainGPT natural language parser with regex mock fallback (`via chaingpt` / `via mock` badge)
+- `lib/noxEncrypt.ts` — real ECDH P-256 + AES-GCM browser encryption (no fake SDK)
+- `lib/noxExecute.ts` — TEE call + `walletClient.writeContract` → `recordResult`
+- `lib/explainResult.ts` — template-based human-readable explanation
+- `/api/parse-intent` — ChainGPT SSE streaming + mock fallback
+- `/api/tee-evaluate` — ECDH decrypt + evaluate + secp256k1 sign (TEE simulation)
+- `contracts/VeilExecutor.sol` — `recordResult` with inline `ecrecover`, no OpenZeppelin
+- `contracts/VeilVault.sol` — ETH custody: `deposit`, `executeTrade` (executor-gated), `withdraw`
+- Hardhat v3 setup — `npx hardhat compile` works
+- Standalone viem deploy script — `npx tsx scripts/deploy.ts`
+- `.env.example` documents every required variable
+- Committed and pushed to `github.com/zaxcoraider/veil`
+
+### NOT done yet ⚠️ — needed before May 1 submission
+- [ ] **Generate TEE keys** → `npx tsx scripts/generate-tee-keys.ts` → paste into `.env.local`
+- [ ] **Get testnet ETH** on Arbitrum Sepolia (faucet below)
+- [ ] **Compile contracts** → `npx hardhat compile`
+- [ ] **Deploy contracts** → `npx tsx scripts/deploy.ts`
+- [ ] **Update `.env.local`** with printed `NEXT_PUBLIC_VEIL_CONTRACT` address
+- [ ] **Deploy to Vercel** + add all env vars in Vercel dashboard
+- [ ] **Test end-to-end** in browser with a real wallet
+- [ ] **Submit on DoraHacks** before May 1
 
 ---
 
@@ -41,59 +79,35 @@ User types: "Buy ETH if price drops below 2000"
 veil/
 ├── app/
 │   ├── api/
-│   │   ├── parse-intent/route.ts      ChainGPT parse + regex mock fallback
-│   │   └── execute-intent/route.ts    TEE simulation API
+│   │   ├── parse-intent/route.ts      ChainGPT SSE + regex mock fallback
+│   │   ├── tee-evaluate/route.ts      TEE: ECDH decrypt → evaluate → sign
+│   │   └── execute-intent/route.ts    (OLD — not used in pipeline, ignore)
 │   ├── components/
 │   │   ├── ConnectButton.tsx           wagmi wallet connect
-│   │   └── IntentForm.tsx              Pipeline UI with live step tracker
+│   │   └── IntentForm.tsx              4-step pipeline UI with status badges
 │   ├── page.tsx                        Main page (server component)
 │   ├── providers.tsx                   WagmiProvider + QueryClientProvider
 │   └── layout.tsx
 │
 ├── lib/
-│   ├── wagmi.ts                        wagmi config (Arbitrum Sepolia)
-│   ├── encryptIntent.ts                RawIntent → EncryptedPayload (AES-GCM + Nox types)
-│   ├── executeIntent.ts                Isolated confidentialCompute() — TEE entry point
-│   ├── noxEncrypt.ts                   iExec Nox threshold encryption (real TEE)
-│   ├── noxExecute.ts                   Full Nox flow: encrypt → contract → publicDecrypt poll
-│   └── explainResult.ts                Template-based execution explanation
+│   ├── wagmi.ts                        wagmi config — Arbitrum Sepolia
+│   ├── noxEncrypt.ts                   ECDH + AES-GCM browser encryption
+│   ├── noxExecute.ts                   TEE API call + writeContract recordResult
+│   ├── explainResult.ts                Template explanation generator
+│   ├── encryptIntent.ts                (OLD — unused, kept for reference)
+│   └── executeIntent.ts               (OLD — unused, kept for reference)
 │
 ├── contracts/
-│   ├── VeilExecutor.sol                Nox TEE confidential comparison contract
-│   └── VeilVault.sol                   Custody + execution gate (deposit/executeTrade/withdraw)
+│   ├── VeilExecutor.sol                ecrecover-based TEE result verifier
+│   └── VeilVault.sol                   ETH custody with executor gate
 │
 ├── scripts/
-│   └── deploy.ts                       Standalone viem deploy script (run with tsx)
+│   ├── generate-tee-keys.ts            One-time: generate ECDH + secp256k1 keypair
+│   └── deploy.ts                       Standalone viem deploy (no Hardhat HRE)
 │
-└── hardhat.config.ts                   Hardhat v3, Arbitrum Sepolia network
+├── .env.example                        All required env vars documented
+└── hardhat.config.ts                   Hardhat v3, ESM, Arbitrum Sepolia
 ```
-
----
-
-## What's done
-
-- [x] Next.js 15 app — dark UI, wallet connect, 4-step pipeline tracker
-- [x] ChainGPT natural language parser with regex mock fallback
-- [x] `lib/encryptIntent.ts` — `RawIntent` / `EncryptedPayload` type separation, AES-GCM browser crypto placeholder
-- [x] `lib/executeIntent.ts` — isolated `confidentialCompute(threshold, operator, price)` — pure TEE entry point
-- [x] `lib/noxEncrypt.ts` — real iExec Nox threshold encryption via `@iexec-nox/handle`
-- [x] `lib/noxExecute.ts` — full TEE flow: encrypt → contract call → `pollPublicDecrypt` (60s timeout)
-- [x] `lib/explainResult.ts` — human-readable explanation from execution result
-- [x] `contracts/VeilExecutor.sol` — Nox TEE confidential comparison (`Nox.lt`, `Nox.fromExternal`, `Nox.allowPublicDecryption`)
-- [x] `contracts/VeilVault.sol` — ETH custody: `deposit`, `executeTrade` (executor-gated), `withdraw`
-- [x] Hardhat v3 setup — `npx hardhat compile` compiles both contracts
-- [x] Deploy script — `npx tsx scripts/deploy.ts`
-- [x] Post-execution "Why" card with natural language explanation
-
-## What's still needed
-
-- [ ] **Deploy VeilVault** to Arbitrum Sepolia — set `DEPLOYER_PRIVATE_KEY` then run `npx tsx scripts/deploy.ts`
-- [ ] **Update `NEXT_PUBLIC_VEIL_CONTRACT`** in `.env.local` with deployed VeilVault address
-- [ ] **Deploy VeilExecutor** and call `vault.setExecutor(<executor_address>, true)`
-- [ ] **ChainGPT API key** — add `CHAINGPT_API_KEY` to `.env.local` (currently falls back to mock parser)
-- [ ] **Real price oracle** — replace `CURRENT_PRICE = 1900` in `lib/noxExecute.ts` with Chainlink/Pyth call
-- [ ] **USDC support** — current vault uses native ETH; production needs ERC-20 approve + transferFrom flow
-- [ ] **Security** — remove `ephemeralKey` export from `encryptIntent.ts` in production (TEE holds the key, not the client)
 
 ---
 
@@ -101,46 +115,94 @@ veil/
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
+cp .env.example .env.local   # fill in values — see below
+npm run dev                  # http://localhost:3000
 ```
 
-Create `.env.local` (copy from `.env.local` — already in repo, fill in the blanks):
+### Environment variables (`.env.local`)
 
-```env
-NEXT_PUBLIC_VEIL_CONTRACT=0x...    # deployed VeilVault address
-CHAINGPT_API_KEY=                  # optional — falls back to mock parser
-DEPLOYER_PRIVATE_KEY=0x...         # deployment only, never commit
-ARB_SEPOLIA_RPC=                   # optional — defaults to public endpoint
-ARBISCAN_API_KEY=                  # optional — for contract verification
-```
+| Variable | Required | Description |
+|---|---|---|
+| `NEXT_PUBLIC_VEIL_CONTRACT` | Yes | VeilExecutor address after deploy |
+| `CHAINGPT_API_KEY` | No | Falls back to mock parser if empty |
+| `NEXT_PUBLIC_TEE_ECDH_PUBLIC_KEY` | Yes | From `generate-tee-keys.ts` |
+| `TEE_ECDH_PRIVATE_KEY` | Yes | From `generate-tee-keys.ts` — keep secret |
+| `TEE_SIGNING_KEY` | Yes | From `generate-tee-keys.ts` — keep secret |
+| `NEXT_PUBLIC_TEE_ADDRESS` | Yes | From `generate-tee-keys.ts` |
+| `DEPLOYER_PRIVATE_KEY` | Deploy only | Wallet that pays gas — keep secret |
+| `ARB_SEPOLIA_RPC` | No | Defaults to public Arbitrum Sepolia RPC |
+| `ARBISCAN_API_KEY` | No | For contract verification only |
 
-## Deploy contracts
+---
 
+## Deploy — step by step
+
+### 1. Generate TEE keys (one-time)
 ```bash
-# 1. Compile both contracts
-npx hardhat compile
+npx tsx scripts/generate-tee-keys.ts
+# Paste ALL printed values into .env.local
+```
 
-# 2. Deploy VeilVault (needs DEPLOYER_PRIVATE_KEY in .env.local)
+### 2. Get testnet ETH
+- Alchemy faucet: `faucets.chain.link` (needs 1 LINK on mainnet)
+- Triangle: `faucet.triangleplatform.com/arbitrum/sepolia`
+- Official: `faucet.quicknode.com/arbitrum/sepolia`
+
+### 3. Compile contracts
+```bash
+npx hardhat compile
+# Artifacts → hardhat-artifacts/ (gitignored)
+```
+
+### 4. Deploy contracts
+```bash
+# Requires: DEPLOYER_PRIVATE_KEY + NEXT_PUBLIC_TEE_ADDRESS in .env.local
 npx tsx scripts/deploy.ts
 
-# 3. Copy printed address → NEXT_PUBLIC_VEIL_CONTRACT in .env.local
-
-# 4. Verify on Arbiscan (optional)
-npx hardhat verify --network arbitrumSepolia <address>
+# Output:
+# VeilExecutor: 0x...   ← set as NEXT_PUBLIC_VEIL_CONTRACT
+# VeilVault:    0x...
 ```
 
-Get testnet ETH: `faucet.triangleplatform.com/arbitrum/sepolia`
+### 5. Update `.env.local`
+```env
+NEXT_PUBLIC_VEIL_CONTRACT=0x<VeilExecutor address from step 4>
+```
+
+### 6. Deploy to Vercel
+```
+1. Push to GitHub (done)
+2. Import repo at vercel.com
+3. Add all env vars from .env.local (except DEPLOYER_PRIVATE_KEY)
+4. Deploy
+```
+
+### 7. Verify contracts (optional)
+```bash
+npx hardhat verify --network arbitrumSepolia <VeilExecutor> <TEE_ADDRESS>
+npx hardhat verify --network arbitrumSepolia <VeilVault>
+```
 
 ---
 
 ## Key design decisions
 
-**Threshold privacy** — the plaintext threshold only exists inside the Nox TEE enclave. The contract handles an opaque `bytes32` handle. The deployer, relayer, and blockchain explorers see nothing.
+**Threshold privacy** — The plaintext threshold only exists inside the TEE. The contract handles an opaque `bytes32` handle. Blockchain explorers and MEV bots see nothing useful.
 
-**`confidentialCompute` isolation** — `lib/executeIntent.ts` wraps the evaluation in a single pure function. Migrating to Nox TEE = replacing one function body, not refactoring the whole app.
+**Real ECDH — no SDK** — `lib/noxEncrypt.ts` uses standard WebCrypto APIs (P-256 ECDH + AES-GCM). No dependency on `@iexec-nox/handle`. The same cryptographic pattern iExec Nox uses under the hood.
 
-**ChainGPT → mock fallback** — the pipeline degrades gracefully without an API key. The UI badge always shows which path ran (`via chaingpt` / `via mock`).
+**ecrecover trust model** — `VeilExecutor` accepts only results signed by `TEE_ADDRESS` (set at deploy time). For hackathon: TEE_ADDRESS is our server key. For production: it would be the iExec Nox network's attestation key.
 
-**Checks-effects-interactions in `withdraw()`** — balance set to zero before the ETH transfer, preventing re-entrancy.
+**ChainGPT → mock fallback** — pipeline degrades gracefully without an API key. The UI badge shows which path ran.
 
-**`onlyApprovedExecutor` gate** — `executeTrade` can only be called by the whitelisted VeilExecutor contract, not by arbitrary addresses.
+**Checks-effects-interactions in `withdraw()`** — balance zeroed before ETH transfer, preventing re-entrancy.
+
+**`onlyApprovedExecutor` gate** — `VeilVault.executeTrade` is callable only by the whitelisted VeilExecutor, not arbitrary addresses.
+
+---
+
+## Hackathon context
+
+**Event:** [iExec Vibe Coding Challenge](https://dorahacks.io/hackathon/vibe-coding-iexec/detail) · DoraHacks  
+**Deadline:** May 1  
+**Why Veil fits:** The challenge asks for confidential + programmable financial apps on iExec Nox. Veil implements the exact Nox cryptographic pattern (ECDH encrypt → TEE evaluate → ecrecover verify) and uses ChainGPT, which is an explicitly supported tool in this hackathon.
