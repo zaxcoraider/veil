@@ -165,7 +165,7 @@ export function IntentForm() {
       setStep("evaluate", "active");
       setLoadingLabel("TEE evaluating…");
 
-      const result = await noxExecute(walletClient, publicClient, threshold, contractAddress);
+      const result = await noxExecute(walletClient, publicClient, encrypted, parsedData.condition, contractAddress);
       setExecResult(result);
       setStep("evaluate", "done");
 
