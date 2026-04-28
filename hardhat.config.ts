@@ -14,12 +14,13 @@ const config: HardhatUserConfig = {
   },
 
   networks: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     arbitrumSepolia: {
-      type:     "http",           // required in Hardhat v3
+      type:     "http",  // required at runtime in Hardhat v3 (types lag behind)
       url:      RPC,
-      accounts: PRIVKEY ? { mnemonic: undefined, privateKey: PRIVKEY } as never : undefined,
+      accounts: PRIVKEY ? [PRIVKEY] : [],
       chainId:  421614,
-    },
+    } as any,
   },
 
   etherscan: {
