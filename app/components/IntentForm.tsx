@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useWalletClient, usePublicClient } from "wagmi";
 import { noxEncryptThreshold, type NoxEncryptResult } from "@/lib/noxEncrypt";
 import { noxExecute, type NoxExecuteResult } from "@/lib/noxExecute";
+import { generateExplanation } from "@/lib/explainResult";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,7 @@ export function IntentForm() {
   const [parsed, setParsed]   = useState<ParsedIntent | null>(null);
   const [noxResult, setNoxResult] = useState<NoxEncryptResult | null>(null);
   const [execResult, setExecResult] = useState<NoxExecuteResult | null>(null);
+  const [explanation, setExplanation] = useState<string | null>(null);
   const [error, setError]     = useState<string | null>(null);
 
   const { data: walletClient } = useWalletClient();
@@ -132,6 +134,7 @@ export function IntentForm() {
     setParsed(null);
     setNoxResult(null);
     setExecResult(null);
+    setExplanation(null);
     setPipeline(IDLE_PIPELINE);
 
     try {
@@ -166,8 +169,18 @@ export function IntentForm() {
       setExecResult(result);
       setStep("evaluate", "done");
 
-      // ── Step 4: Contract result ─────────────────────────────────────────
+      // ── Step 4: Contract result + explanation ──────────────────────────
       setStep("execute", result.execute ? "done" : "done");
+
+      const condMatch = parsedData.condition.match(/price\s*([<>])\s*(\d+(?:\.\d+)?)/);
+      setExplanation(generateExplanation({
+        action:    parsedData.action as "buy" | "sell",
+        asset:     parsedData.asset,
+        operator:  (condMatch?.[1] ?? "<") as "<" | ">",
+        threshold: condMatch ? parseFloat(condMatch[2]) : 0,
+        price:     result.price,
+        execute:   result.execute,
+      }));
 
     } catch (err) {
       // Mark active step as errored
@@ -274,6 +287,14 @@ export function IntentForm() {
           <p className="break-all font-mono text-xs text-violet-300 leading-relaxed">{noxResult.handle}</p>
           <p className="mt-2 mb-1 text-xs text-zinc-600">Proof</p>
           <p className="break-all font-mono text-xs text-violet-400/50 leading-relaxed">{noxResult.handleProof}</p>
+        </div>
+      )}
+
+      {/* Explanation */}
+      {explanation && (
+        <div className="rounded-xl border border-white/10 bg-zinc-900 px-5 py-4">
+          <p className="mb-1.5 text-xs font-medium uppercase tracking-widest text-zinc-500">Why</p>
+          <p className="text-sm leading-relaxed text-zinc-300">{explanation}</p>
         </div>
       )}
 
