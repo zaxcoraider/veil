@@ -1,113 +1,138 @@
 "use client";
 
+import { createViemHandleClient } from "@iexec-nox/handle";
+import { decodeEventLog } from "viem";
 import type { PublicClient, WalletClient } from "viem";
 import type { NoxEncryptResult } from "./noxEncrypt";
 
 // ── What this file does ───────────────────────────────────────────────────────
 //
-// After the threshold is encrypted (noxEncrypt.ts), this file:
-//  1. Sends the encrypted blob to the TEE for evaluation
-//  2. Receives a signed result (execute: bool, price: number, signature)
-//  3. Submits that result to the smart contract, which verifies the TEE signature
+// After the threshold is encrypted via the Nox Gateway (noxEncrypt.ts):
 //
-// In iExec Nox production, steps 1-3 happen on-chain automatically:
-//  - Nox.lt() emits an event → Nox workers detect it
-//  - Workers compute inside SGX enclaves → write result back on-chain
-//  - Client polls publicDecrypt() until the result appears
+//  1. Fetch the live ETH price from /api/price (CoinGecko).
+//  2. Submit the intent on-chain: VeilExecutor.submitIntent()
+//     - The contract calls Nox.lt/gt() → NoxCompute emits an event.
+//     - Real SGX TEE workers pick up the event, evaluate price OP threshold
+//       without ever seeing the plaintext, and publish the ebool result.
+//  3. Parse the resultHandle from the IntentSubmitted event.
+//  4. Poll handleClient.publicDecrypt(resultHandle) until the TEE writes the
+//     result back, then return the boolean decision.
 //
-// For the hackathon: step 1-2 is an API call to /api/tee-evaluate
-//                    step 3 is a direct contract write (same as production)
+// No custom TEE route. No simulated evaluation. All on-chain + Nox Gateway.
 
 const VEIL_ABI = [
   {
-    name: "recordResult",
+    name: "submitIntent",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "handle",       type: "bytes32" },
-      { name: "execute",      type: "bool"    },
-      { name: "price",        type: "uint256" },
-      { name: "teeSignature", type: "bytes"   },
+      { name: "thresholdHandle", type: "bytes32"  },
+      { name: "handleProof",     type: "bytes"    },
+      { name: "currentPrice",    type: "uint256"  },
+      { name: "checkLt",         type: "bool"     },
     ],
-    outputs: [],
+    outputs: [{ name: "resultHandle", type: "bytes32" }],
   },
+] as const;
+
+const INTENT_SUBMITTED_ABI = [
   {
-    name: "getResult",
-    type: "function",
-    stateMutability: "view",
-    inputs:  [{ name: "handle", type: "bytes32" }],
-    outputs: [
-      { name: "execute", type: "bool"    },
-      { name: "price",   type: "uint256" },
-      { name: "exists",  type: "bool"    },
+    name: "IntentSubmitted",
+    type: "event",
+    inputs: [
+      { name: "user",         type: "address", indexed: true  },
+      { name: "resultHandle", type: "bytes32", indexed: true  },
+      { name: "price",        type: "uint256", indexed: false },
+      { name: "checkLt",      type: "bool",    indexed: false },
     ],
   },
 ] as const;
 
 export type NoxExecuteResult = {
-  execute: boolean;
-  price:   number;
+  execute:      boolean;
+  price:        number;
   resultHandle: string;
 };
 
 export async function noxExecute(
-  walletClient: WalletClient,
-  publicClient: PublicClient,
-  encrypted:   NoxEncryptResult,
-  condition:   string,
+  walletClient:    WalletClient,
+  publicClient:    PublicClient,
+  encrypted:       NoxEncryptResult,
+  condition:       string,
   contractAddress: `0x${string}`
 ): Promise<NoxExecuteResult> {
 
-  // ── Step 1: Send encrypted threshold to TEE ──────────────────────────────
-  //
-  // The TEE receives:
-  //   - ciphertext + iv + ephemeralPubKey  (to decrypt the threshold)
-  //   - handle                             (to bind the result to this input)
-  //   - condition                          (the operator: < or >)
-  //
-  // The TEE returns:
-  //   - execute: bool   (result of price OP threshold)
-  //   - price: number   (the market price it used)
-  //   - signature       (TEE's ECDSA sig over keccak256(handle, execute, price))
+  // ── Step 1: Fetch real ETH price ─────────────────────────────────────────
+  const priceRes = await fetch("/api/price");
+  if (!priceRes.ok) throw new Error("Failed to fetch ETH price from CoinGecko");
+  const { price } = (await priceRes.json()) as { price: number };
 
-  const teeRes = await fetch("/api/tee-evaluate", {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...encrypted, condition, contractAddress }),
-  });
+  // "price < threshold" → checkLt = true  (buy if price drops below target)
+  // "price > threshold" → checkLt = false (sell if price rises above target)
+  const checkLt = condition.includes("<") || !condition.includes(">");
 
-  if (!teeRes.ok) {
-    const { error } = await teeRes.json().catch(() => ({ error: teeRes.statusText }));
-    throw new Error(`TEE evaluation failed: ${error}`);
-  }
-
-  const { execute, price, signature } = await teeRes.json() as {
-    execute:   boolean;
-    price:     number;
-    signature: `0x${string}`;
-  };
-
-  // ── Step 2: Record TEE result on-chain ────────────────────────────────────
-  //
-  // VeilExecutor.recordResult() does:
-  //   1. Reconstruct msgHash = keccak256(handle || execute || price)
-  //   2. signer = ecrecover(ethSignedMessage(msgHash), teeSignature)
-  //   3. require(signer == TEE_ADDRESS)
-  //   4. Store result, emit Evaluated event
-  //
-  // The contract NEVER sees the plaintext threshold.
-  // It only trusts results that the TEE has signed.
-
+  // ── Step 2: Submit intent on-chain ────────────────────────────────────────
+  // VeilExecutor.submitIntent():
+  //   - Nox.fromExternal() validates the Gateway's EIP-712 proof
+  //   - Nox.lt/gt() triggers confidential comparison in SGX enclave
+  //   - Nox.allowPublicDecryption() marks result as public
   const txHash = await walletClient.writeContract({
     chain:   walletClient.chain   ?? null,
     account: walletClient.account ?? null,
     address: contractAddress,
     abi:     VEIL_ABI,
-    functionName: "recordResult",
-    args: [encrypted.handle, execute, BigInt(price), signature],
+    functionName: "submitIntent",
+    args: [
+      encrypted.handle,
+      encrypted.handleProof,
+      BigInt(price),
+      checkLt,
+    ],
   });
 
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
 
-  return { execute, price, resultHandle: encrypted.handle };
+  // ── Step 3: Parse resultHandle from IntentSubmitted event ─────────────────
+  let resultHandle: `0x${string}` | undefined;
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi:    INTENT_SUBMITTED_ABI,
+        data:   log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === "IntentSubmitted") {
+        resultHandle = decoded.args.resultHandle as `0x${string}`;
+        break;
+      }
+    } catch { /* not this event */ }
+  }
+  if (!resultHandle) throw new Error("IntentSubmitted event not found in transaction");
+
+  // ── Step 4: Poll Nox Gateway until TEE result is available ────────────────
+  // The NoxCompute event → SGX worker → publicDecrypt flow typically takes
+  // a few seconds on testnet. We retry every 2s for up to 60s.
+  const handleClient = await createViemHandleClient(walletClient);
+
+  let execute: boolean | undefined;
+  const maxAttempts = 30;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const { value } = await handleClient.publicDecrypt(resultHandle);
+      execute = value as boolean;
+      break;
+    } catch {
+      if (attempt < maxAttempts - 1) {
+        await new Promise<void>((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  if (execute === undefined) {
+    throw new Error(
+      "TEE result not yet available after 60s. The Nox network may be busy — refresh in a moment."
+    );
+  }
+
+  return { execute, price, resultHandle };
 }

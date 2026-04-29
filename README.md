@@ -1,9 +1,9 @@
 # Veil — Confidential Intent Execution Layer
 
 > **Hackathon:** iExec Vibe Coding Challenge · DoraHacks · **Deadline: May 1**
-> **Submitted by:** zaxcoraider · Stack: Next.js 15 · Tailwind · wagmi + viem · Solidity · ChainGPT · Arbitrum Sepolia
+> **Submitted by:** zaxcoraider · Stack: Next.js 16 · Tailwind · wagmi + viem · Solidity · ChainGPT · iExec Nox · Arbitrum Sepolia
 
-A DeFi execution system where users submit natural-language trading intents. The price threshold is encrypted with ECDH + AES-GCM so only the TEE can read it — the condition is **never revealed on-chain**. Only the boolean result (Execute / Hold) becomes public, verified by `ecrecover` on-chain.
+A DeFi execution system where users submit natural-language trading intents. The price threshold is encrypted using the **real iExec Nox Gateway** (Intel TDX SGX enclaves) — the condition is **never revealed on-chain**. Only the boolean result (Execute / Hold) becomes public after real TEE attestation.
 
 ---
 
@@ -13,31 +13,29 @@ A DeFi execution system where users submit natural-language trading intents. The
 User types: "Buy ETH if price drops below 2000"
      │
      ▼
-① ChainGPT (parse-intent API)
+① ChainGPT (/api/parse-intent)
      │  → { action: "buy", asset: "ETH", condition: "price < 2000" }
      ▼
-② Browser encryption (noxEncrypt.ts)
-     │  ECDH(ephemeral.priv, TEE.pub) → AES-GCM key
-     │  AES-GCM encrypt(2000) → ciphertext
-     │  handle = keccak256(ciphertext ‖ iv ‖ ephemeralPubKey)
-     │  handleProof = wallet.sign(keccak256(handle ‖ contractAddress))
-     │  Threshold sealed. Never leaves browser as plaintext.
+② Real Nox Gateway encryption (@iexec-nox/handle)
+     │  handleClient.encryptInput(2000n, "uint256", VeilExecutor)
+     │  → handle      (bytes32 — opaque pointer to encrypted threshold)
+     │  → handleProof (EIP-712 from Nox Gateway — binds handle to VeilExecutor)
+     │  Threshold sealed inside Intel TDX enclave. Never leaves the Nox network.
      ▼
-③ TEE evaluation (/api/tee-evaluate)
-     │  ECDH(TEE.priv, ephemeral.pub) → same AES-GCM key
-     │  AES-GCM decrypt → threshold (never logged, never stored)
-     │  evaluate: price < threshold → execute: bool
-     │  msgHash = keccak256(handle ‖ execute ‖ price)
-     │  signature = TEE_SIGNING_KEY.sign(msgHash)
+③ VeilExecutor.submitIntent(handle, handleProof, price, checkLt)
+     │  Nox.fromExternal(handle, proof) — validates Gateway signature
+     │  Nox.toEuint256(price)           — wraps public price as encrypted handle
+     │  Nox.lt(price, threshold)        — NoxCompute emits Lt event
+     │  → SGX TEE workers evaluate price < threshold privately
+     │  Nox.allowPublicDecryption(result) — result handle marked public
      ▼
-④ VeilExecutor.recordResult(handle, execute, price, signature)
-     │  ecrecover(ethSignedMessage(msgHash), signature) == TEE_ADDRESS
-     │  ✓ Valid → store result, emit Evaluated(handle, execute, price)
+④ handleClient.publicDecrypt(resultHandle)
+     │  Nox Gateway returns: { value: true/false, decryptionProof }
      ▼
-"Trade executed — ETH price ($1,900) dropped below your $2,000 threshold."
+"Trade executed — ETH price ($X) dropped below your $2,000 threshold."
 ```
 
-**The contract never sees the plaintext threshold. Only results signed by the TEE are accepted.**
+**The contract never sees the plaintext threshold. The comparison runs inside a real Intel SGX enclave. Only the boolean result is ever made public.**
 
 ---
 

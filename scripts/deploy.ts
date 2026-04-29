@@ -42,11 +42,8 @@ async function deployContract(
 }
 
 async function main() {
-  const privKey    = process.env.DEPLOYER_PRIVATE_KEY;
-  const teeAddress = process.env.NEXT_PUBLIC_TEE_ADDRESS;
-
-  if (!privKey)    throw new Error("DEPLOYER_PRIVATE_KEY not set. See .env.local");
-  if (!teeAddress) throw new Error("NEXT_PUBLIC_TEE_ADDRESS not set. Run generate-tee-keys.ts");
+  const privKey = process.env.DEPLOYER_PRIVATE_KEY;
+  if (!privKey) throw new Error("DEPLOYER_PRIVATE_KEY not set. See .env.local");
 
   const account   = privateKeyToAccount(privKey as `0x${string}`);
   const rpcUrl    = process.env.ARB_SEPOLIA_RPC ?? "https://sepolia-rollup.arbitrum.io/rpc";
@@ -68,9 +65,9 @@ async function main() {
     walletClient,
     publicClient,
     "./hardhat-artifacts/contracts/VeilExecutor.sol/VeilExecutor.json",
-    [teeAddress]
+    []   // No constructor args — NoxCompute address is hardcoded in Nox.sol library
   );
-  console.log("VeilExecutor:", executorAddress, "  TEE:", teeAddress);
+  console.log("VeilExecutor:", executorAddress);
 
   // ── Deploy VeilVault ───────────────────────────────────────────────────────
 
@@ -89,7 +86,7 @@ async function main() {
   console.log("1. Update .env.local:");
   console.log(`   NEXT_PUBLIC_VEIL_CONTRACT=${executorAddress}`);
   console.log("\n2. Verify on Arbiscan:");
-  console.log(`   npx hardhat verify --network arbitrumSepolia ${executorAddress} ${teeAddress}`);
+  console.log(`   npx hardhat verify --network arbitrumSepolia ${executorAddress}`);
   console.log(`   npx hardhat verify --network arbitrumSepolia ${vaultAddress}`);
   console.log("\n3. Approve VeilExecutor as executor in VeilVault:");
   console.log(`   vault.setExecutor(${executorAddress}, true)`);

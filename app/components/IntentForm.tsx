@@ -40,10 +40,10 @@ const STEP_META: Record<
   keyof PipelineState,
   { title: string; activeLabel: string; doneLabel: string }
 > = {
-  parse:    { title: "Parse",    activeLabel: "Reading intent via ChainGPT…",       doneLabel: "Intent parsed"                },
-  encrypt:  { title: "Encrypt",  activeLabel: "Encrypting threshold in TEE…",        doneLabel: "Threshold sealed"             },
-  evaluate: { title: "Evaluate", activeLabel: "TEE evaluating condition privately…", doneLabel: "Condition evaluated"          },
-  execute:  { title: "Record",   activeLabel: "Writing result on-chain…",            doneLabel: "Result recorded on-chain"     },
+  parse:    { title: "Parse",    activeLabel: "Parsing intent via ChainGPT…",               doneLabel: "Intent parsed"                    },
+  encrypt:  { title: "Encrypt",  activeLabel: "Encrypting threshold via Nox Gateway…",       doneLabel: "Threshold sealed in Nox"          },
+  evaluate: { title: "Evaluate", activeLabel: "TEE evaluating in SGX enclave…",              doneLabel: "TEE result received"              },
+  execute:  { title: "Result",   activeLabel: "Finalising…",                                 doneLabel: "Result published on-chain"        },
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────

@@ -1,120 +1,91 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+import {Nox} from "@iexec-nox/nox-protocol-contracts/contracts/sdk/Nox.sol";
+import "encrypted-types/EncryptedTypes.sol";
+
 /**
- * VeilExecutor — on-chain trust anchor for TEE evaluation results.
+ * VeilExecutor — Confidential intent execution on iExec Nox.
  *
  * Flow:
- *  1. Client encrypts price threshold with TEE's public key (off-chain).
- *  2. TEE decrypts privately, evaluates price OP threshold, signs result.
- *  3. Client calls recordResult() with the TEE's signed result.
- *  4. Contract verifies: ecrecover(signature) == TEE_ADDRESS.
- *  5. If valid, result is stored and Evaluated event emitted.
+ *  1. Client encrypts threshold via Nox Gateway SDK (off-chain).
+ *  2. Client calls submitIntent() with handle + proof + current market price.
+ *  3. Contract validates the proof and calls Nox.lt/gt() → NoxCompute emits event.
+ *  4. Real SGX TEE workers compute price OP threshold privately.
+ *  5. Result handle is publicly decryptable via handleClient.publicDecrypt().
  *
- * The contract NEVER sees the plaintext threshold — only the handle (a hash
- * of the encrypted blob) and the boolean result.
- *
- * In iExec Nox production:
- *  - Step 2-3 happen automatically via Nox workers (SGX enclaves).
- *  - Nox.lt(price, threshold) replaces this manual pattern.
- *  - TEE_ADDRESS is the Nox network's attested signing key.
- *
- * For hackathon:
- *  - TEE is /api/tee-evaluate (a trusted server).
- *  - TEE_ADDRESS is set at deploy time from NEXT_PUBLIC_TEE_ADDRESS env var.
- *  - The cryptographic trust model (ECDSA verify) is identical to production.
+ * The contract never sees the plaintext threshold.
+ * Only a boolean result is ever made public, after TEE attestation.
  */
 contract VeilExecutor {
 
-    // ── State ─────────────────────────────────────────────────────────────────
-
-    // The TEE's Ethereum address — only results signed by this key are accepted.
-    // In iExec Nox: this is the network's attestation key, rotatable via governance.
-    address public immutable TEE_ADDRESS;
-
-    struct TEEResult {
-        bool     execute;  // true = execute the trade
-        uint256  price;    // market price used in the evaluation
-        bool     exists;   // false = result not yet recorded
+    struct Intent {
+        address  user;
+        bytes32  resultHandle;
+        uint256  price;
+        bool     checkLt;
+        bool     exists;
     }
 
-    // handle (bytes32) → result
-    // handle = keccak256(ciphertext || iv || ephemeralPubKey) — computed client-side
-    mapping(bytes32 => TEEResult) public results;
+    mapping(bytes32 => Intent) public intents;
 
-    // ── Events ────────────────────────────────────────────────────────────────
-
-    event Evaluated(bytes32 indexed handle, bool execute, uint256 price);
-
-    // ── Constructor ───────────────────────────────────────────────────────────
-
-    constructor(address teeAddress) {
-        require(teeAddress != address(0), "VeilExecutor: zero TEE address");
-        TEE_ADDRESS = teeAddress;
-    }
-
-    // ── Core ──────────────────────────────────────────────────────────────────
+    event IntentSubmitted(
+        address indexed user,
+        bytes32 indexed resultHandle,
+        uint256 price,
+        bool    checkLt
+    );
 
     /**
-     * Record a TEE evaluation result.
+     * Submit a confidential trading intent.
      *
-     * @param handle        bytes32 — on-chain identifier for the encrypted threshold
-     * @param execute       bool    — true if price met the condition
-     * @param price         uint256 — market price the TEE used
-     * @param teeSignature  bytes   — TEE's ECDSA signature over keccak256(handle || execute || price)
-     *
-     * The TEE signs: keccak256(abi.encodePacked(handle, execute, price))
-     * We verify using Ethereum's personal_sign prefix ("\x19Ethereum Signed Message:\n32").
+     * @param thresholdHandle  externalEuint256 — encrypted threshold from Nox Gateway
+     * @param handleProof      bytes — EIP-712 proof binding handle to this contract + caller
+     * @param currentPrice     uint256 — current market price (caller-supplied, public)
+     * @param checkLt          bool — true = execute if price < threshold; false = price > threshold
      */
-    function recordResult(
-        bytes32 handle,
-        bool    execute,
-        uint256 price,
-        bytes calldata teeSignature
-    ) external {
-        require(!results[handle].exists, "VeilExecutor: already recorded");
+    function submitIntent(
+        externalEuint256 thresholdHandle,
+        bytes calldata   handleProof,
+        uint256          currentPrice,
+        bool             checkLt
+    ) external returns (bytes32 resultHandle) {
+        // Validate handle proof — NoxCompute verifies the Gateway's EIP-712 signature.
+        // This ensures the encrypted threshold was produced by the official Nox Gateway
+        // and is authorized for use by THIS contract with THIS caller.
+        euint256 threshold = Nox.fromExternal(thresholdHandle, handleProof);
+        Nox.allowThis(threshold);
 
-        // Reconstruct the message the TEE signed (must match tee-evaluate/route.ts exactly)
-        bytes32 msgHash = keccak256(abi.encodePacked(handle, execute, price));
+        // Wrap the public price as a "public handle" so NoxCompute can compare it
+        // against the encrypted threshold inside the SGX enclave.
+        euint256 encryptedPrice = Nox.toEuint256(currentPrice);
 
-        // Apply Ethereum signed message prefix (matches viem's signMessage with raw bytes)
-        bytes32 ethHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", msgHash)
-        );
+        // Confidential comparison: NoxCompute emits an event → SGX workers evaluate
+        // price OP threshold without ever seeing the plaintext threshold.
+        ebool result = checkLt
+            ? Nox.lt(encryptedPrice, threshold)
+            : Nox.gt(encryptedPrice, threshold);
 
-        // Recover signer — must be the trusted TEE
-        address signer = _recover(ethHash, teeSignature);
-        require(signer == TEE_ADDRESS, "VeilExecutor: signature not from TEE");
+        // Make the boolean result publicly decryptable so the frontend can retrieve it.
+        Nox.allowPublicDecryption(result);
+        Nox.allowThis(result);
 
-        results[handle] = TEEResult(execute, price, true);
-        emit Evaluated(handle, execute, price);
+        resultHandle = ebool.unwrap(result);
+
+        require(!intents[resultHandle].exists, "VeilExecutor: intent already exists");
+
+        intents[resultHandle] = Intent({
+            user:         msg.sender,
+            resultHandle: resultHandle,
+            price:        currentPrice,
+            checkLt:      checkLt,
+            exists:       true
+        });
+
+        emit IntentSubmitted(msg.sender, resultHandle, currentPrice, checkLt);
     }
 
-    // ── View ──────────────────────────────────────────────────────────────────
-
-    function getResult(bytes32 handle)
-        external view
-        returns (bool execute, uint256 price, bool exists)
-    {
-        TEEResult memory r = results[handle];
-        return (r.execute, r.price, r.exists);
-    }
-
-    // ── Internal: ECDSA recovery (no OpenZeppelin dependency) ─────────────────
-
-    function _recover(bytes32 hash, bytes calldata sig) internal pure returns (address) {
-        require(sig.length == 65, "VeilExecutor: bad sig length");
-        bytes32 r;
-        bytes32 s;
-        uint8   v;
-        assembly {
-            r := calldataload(sig.offset)
-            s := calldataload(add(sig.offset, 32))
-            v := byte(0, calldataload(add(sig.offset, 64)))
-        }
-        if (v < 27) v += 27;
-        address recovered = ecrecover(hash, v, r, s);
-        require(recovered != address(0), "VeilExecutor: ecrecover failed");
-        return recovered;
+    function getIntent(bytes32 resultHandle) external view returns (Intent memory) {
+        return intents[resultHandle];
     }
 }
