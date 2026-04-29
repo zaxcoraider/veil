@@ -7,8 +7,12 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Veil — Private Execution Layer",
-  description: "Submit confidential trading intents that execute privately via TEE.",
+  title: "Veil — Confidential Intent. Executed Privately.",
+  description: "Submit confidential trading intents sealed inside Intel SGX/TDX enclaves via iExec Nox. Your condition never touches the blockchain.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
