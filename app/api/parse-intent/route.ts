@@ -27,7 +27,10 @@ async function parseWithChainGPT(
   amount: string
 ): Promise<ParsedIntent | null> {
   const apiKey = process.env.CHAINGPT_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.log("[parse-intent] No CHAINGPT_API_KEY — using mock parser");
+    return null;
+  }
 
   try {
     const res = await fetch("https://api.chaingpt.org/chat/stream", {
@@ -43,10 +46,15 @@ async function parseWithChainGPT(
       signal: AbortSignal.timeout(10_000),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(`[parse-intent] ChainGPT HTTP ${res.status}: ${body}`);
+      return null;
+    }
 
     // Collect streaming response
     const raw = await res.text();
+    console.log("[parse-intent] ChainGPT raw response:", raw.slice(0, 300));
 
     // Strip SSE "data: " prefixes if present, then join
     const text = raw
@@ -58,13 +66,21 @@ async function parseWithChainGPT(
 
     // Extract JSON object from text
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    if (!jsonMatch) {
+      console.error("[parse-intent] ChainGPT response has no JSON object. Full text:", text.slice(0, 500));
+      return null;
+    }
 
     const parsed = JSON.parse(jsonMatch[0]) as ParsedIntent;
-    if (!parsed.action || !parsed.asset || !parsed.condition) return null;
+    if (!parsed.action || !parsed.asset || !parsed.condition) {
+      console.error("[parse-intent] ChainGPT JSON missing required fields:", parsed);
+      return null;
+    }
 
+    console.log("[parse-intent] ChainGPT parsed successfully:", parsed);
     return parsed;
-  } catch {
+  } catch (err) {
+    console.error("[parse-intent] ChainGPT exception:", err);
     return null;
   }
 }
@@ -107,8 +123,9 @@ export async function POST(req: NextRequest) {
   const { intent, amount = "100" } = body as { intent: string; amount: string };
 
   // Try ChainGPT first; fall back to mock if key missing or request fails
-  const result =
-    (await parseWithChainGPT(intent, amount)) ?? parseWithMock(intent, amount);
+  const cgptResult = await parseWithChainGPT(intent, amount);
+  const source = cgptResult ? "chaingpt" : "mock";
+  const result = cgptResult ?? parseWithMock(intent, amount);
 
-  return NextResponse.json({ ...result, source: process.env.CHAINGPT_API_KEY ? "chaingpt" : "mock" });
+  return NextResponse.json({ ...result, source });
 }
