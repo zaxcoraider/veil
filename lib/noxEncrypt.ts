@@ -32,7 +32,7 @@ export async function noxEncryptThreshold(
   const handleClient = await createViemHandleClient(walletClient);
 
   const { handle, handleProof } = await handleClient.encryptInput(
-    BigInt(threshold),
+    BigInt(Math.round(threshold)),
     "uint256",
     contractAddress
   );

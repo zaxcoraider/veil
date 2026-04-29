@@ -65,7 +65,8 @@ export async function noxExecute(
   // ── Step 1: Fetch real ETH price ─────────────────────────────────────────
   const priceRes = await fetch("/api/price");
   if (!priceRes.ok) throw new Error("Failed to fetch ETH price from CoinGecko");
-  const { price } = (await priceRes.json()) as { price: number };
+  const { price: rawPrice } = (await priceRes.json()) as { price: number };
+  const price = Math.round(rawPrice); // BigInt requires integer — round cents off
 
   // "price < threshold" → checkLt = true  (buy if price drops below target)
   // "price > threshold" → checkLt = false (sell if price rises above target)
