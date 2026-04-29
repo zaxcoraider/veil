@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(grep -qE \"error TS|Found [0-9]+ error|\\\\$\" /c/Users/ASIFKH~1/AppData/Local/Temp/claude/C--Users-ASIF-KHAN-Desktop-veil/fed404bf-a2ab-4b24-8291-15aa10f988d9/tasks/bh0oq0axb.output)",
+      "Bash(npm run *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(curl -s -X POST http://localhost:3000/api/parse-intent -H 'Content-Type: application/json' -d '{\"intent\": \"Buy ETH if price drops below 2000\"}')",
+      "Bash(node -e ' *)",
+      "Bash(node --input-type=module)",
+      "Bash(node *)",
+      "Bash(curl -s -X POST http://localhost:3000/api/execute-intent -H 'Content-Type: application/json' -d '{\"encrypted\":\"eyJhY3Rpb24iOiJidXkiLCJhc3NldCI6IkVUSCIsImFtb3VudCI6IjEwMCIsImNvbmRpdGlvbiI6InByaWNlIDwgMjAwMCJ9\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/execute-intent -H 'Content-Type: application/json' -d '{\"encrypted\":\"eyJhY3Rpb24iOiJidXkiLCJhc3NldCI6IkVUSCIsImFtb3VudCI6IjEwMCIsImNvbmRpdGlvbiI6InByaWNlID4gMjAwMCJ9\"}')",
+      "WebFetch(domain:docs.iex.ec)",
+      "Bash(npm show *)",
+      "WebFetch(domain:cdefi-wizard.iex.ec)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm search *)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "WebFetch(domain:docs.chaingpt.org)",
+      "Bash(ls foundry*)",
+      "Bash(ls -la contracts/)",
+      "Bash(ls foundry.toml)",
+      "Bash(ls src/)",
+      "Bash(ls script/)",
+      "Bash(grep -q \"EXIT:\\\\|^$\" /c/Users/ASIFKH~1/AppData/Local/Temp/claude/C--Users-ASIF-KHAN-Desktop-veil/fed404bf-a2ab-4b24-8291-15aa10f988d9/tasks/b9yhara9v.output)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(jobs *)",
+      "WebFetch(domain:dorahacks.io)",
+      "WebSearch",
+      "Bash(npx tsx *)",
+      "Bash(npx hardhat *)",
+      "Read(//c/Users/ASIFKH~1/AppData/Local/Temp/claude/C--Users-ASIF-KHAN-Desktop-veil/06433162-9d0a-4589-977e-a68292b70e90/tasks/**)",
+      "WebFetch(domain:shieldedmode.fhenix.io)",
+      "WebFetch(domain:test.redact.money)",
+      "Bash(rm app/favicon.ico)"
+    ]
+  }
+}
