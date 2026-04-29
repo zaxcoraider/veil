@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useWalletClient, usePublicClient } from "wagmi";
+import { useWalletClient, usePublicClient, useAccount, useSwitchChain } from "wagmi";
+import { arbitrumSepolia } from "viem/chains";
 import { noxEncryptThreshold, type NoxEncryptResult } from "@/lib/noxEncrypt";
 import { noxExecute, type NoxExecuteResult } from "@/lib/noxExecute";
 import { generateExplanation } from "@/lib/explainResult";
@@ -162,6 +163,9 @@ export function IntentForm() {
 
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
+  const { isConnected, chainId } = useAccount();
+  const { switchChain } = useSwitchChain();
+  const isWrongNetwork = isConnected && chainId !== arbitrumSepolia.id;
 
   function setStep(step: keyof PipelineState, status: StepStatus) {
     setPipeline((p) => ({ ...p, [step]: status }));
@@ -170,8 +174,16 @@ export function IntentForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!walletClient || !publicClient) {
+    if (!isConnected) {
       setError("Connect your wallet first.");
+      return;
+    }
+    if (isWrongNetwork) {
+      switchChain({ chainId: arbitrumSepolia.id });
+      return;
+    }
+    if (!walletClient || !publicClient) {
+      setError("Wallet not ready — please try again.");
       return;
     }
 
@@ -292,9 +304,17 @@ export function IntentForm() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            className={`mt-1 flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 ${
+              isWrongNetwork
+                ? "bg-amber-600 hover:bg-amber-500"
+                : "bg-violet-600 hover:bg-violet-500"
+            }`}
           >
-            {loading ? <><Spinner />{loadingLabel}</> : "Encrypt & Submit Intent"}
+            {loading
+              ? <><Spinner />{loadingLabel}</>
+              : isWrongNetwork
+              ? "Switch to Arbitrum Sepolia"
+              : "Encrypt & Submit Intent"}
           </button>
         </form>
       </div>
