@@ -52,6 +52,7 @@ export type NoxExecuteResult = {
   execute:      boolean;
   price:        number;
   resultHandle: string;
+  txHash:       string;
 };
 
 export async function noxExecute(
@@ -135,5 +136,5 @@ export async function noxExecute(
     );
   }
 
-  return { execute, price, resultHandle };
+  return { execute, price, resultHandle, txHash };
 }

@@ -198,6 +198,7 @@ export function IntentForm() {
   const [noxResult, setNoxResult] = useState<NoxEncryptResult | null>(null);
   const [execResult, setExecResult] = useState<NoxExecuteResult | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
+  const [txHash, setTxHash]   = useState<string | null>(null);
   const [error, setError]     = useState<string | null>(null);
 
   const { data: walletClient } = useWalletClient();
@@ -236,6 +237,7 @@ export function IntentForm() {
     setNoxResult(null);
     setExecResult(null);
     setExplanation(null);
+    setTxHash(null);
     setPipeline(IDLE_PIPELINE);
     setOverallStatus("running");
 
@@ -269,6 +271,7 @@ export function IntentForm() {
 
       const result = await noxExecute(walletClient, publicClient, encrypted, parsedData.condition, contractAddress);
       setExecResult(result);
+      setTxHash(result.txHash);
       setStep("evaluate", "done");
 
       // ── Step 4: Record + explanation ────────────────────────────────────
@@ -491,59 +494,76 @@ export function IntentForm() {
 
       {/* ── Execution result ──────────────────────────────────────────────── */}
       {execResult && (
-        <div className={`animate-fade-up rounded-2xl border p-6 ${
+        <div className={`animate-fade-up rounded-2xl border ${
           execResult.execute
-            ? "card-glow-green border-emerald-500/15 bg-emerald-500/[0.04]"
-            : "card-glow-amber border-amber-500/15 bg-amber-500/[0.04]"
+            ? "border-emerald-500/20 bg-emerald-500/[0.04]"
+            : "border-amber-500/20 bg-amber-500/[0.04]"
         }`}>
-          {/* Decision hero */}
-          <div className="mb-6 flex items-center gap-4">
-            <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ring-1 ${
-              execResult.execute
-                ? "bg-emerald-500/15 ring-emerald-500/25 text-emerald-400"
-                : "bg-amber-500/15 ring-amber-500/25 text-amber-400"
+          {/* Status header */}
+          <div className={`flex items-center gap-3 border-b px-5 py-4 ${
+            execResult.execute ? "border-emerald-500/10" : "border-amber-500/10"
+          }`}>
+            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+              execResult.execute ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/20 text-amber-400"
             }`}>
               {execResult.execute ? (
-                <svg viewBox="0 0 20 20" className="h-6 w-6" fill="currentColor">
-                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd"/>
+                <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="2.5 8 6 12 13.5 4"/>
                 </svg>
               ) : (
-                <svg viewBox="0 0 20 20" className="h-6 w-6" fill="currentColor">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd"/>
+                <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8"/><circle cx="8" cy="11" r=".5" fill="currentColor"/>
                 </svg>
               )}
             </div>
             <div>
-              <p className={`text-xl font-bold ${execResult.execute ? "text-emerald-300" : "text-amber-300"}`}>
+              <p className={`font-semibold ${execResult.execute ? "text-emerald-300" : "text-amber-300"}`}>
                 {execResult.execute ? "Trade Executed" : "Trade Held"}
               </p>
-              <p className={`mt-0.5 text-xs ${execResult.execute ? "text-emerald-600" : "text-amber-600"}`}>
-                {execResult.execute
-                  ? "Condition met — intent confirmed on-chain"
-                  : "Condition not met — intent is pending"}
+              <p className="text-xs text-zinc-600">
+                {execResult.execute ? "Condition met · TEE confirmed on-chain" : "Condition not met · intent is pending"}
               </p>
             </div>
           </div>
 
-          {/* Stats */}
-          <div className="mb-4 grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-white/[0.05] bg-black/25 px-4 py-3">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-700">Market Price</p>
-              <p className="font-mono text-base font-bold text-white">${execResult.price.toLocaleString()}</p>
+          {/* Details */}
+          <div className="px-5 py-4 space-y-3">
+            {/* Stats row */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-white/[0.05] bg-black/20 px-3 py-2.5">
+                <p className="mb-1 text-[10px] text-zinc-700 uppercase tracking-widest font-medium">Market Price</p>
+                <p className="font-mono text-sm font-bold text-white">${execResult.price.toLocaleString()}</p>
+              </div>
+              <div className="rounded-lg border border-white/[0.05] bg-black/20 px-3 py-2.5">
+                <p className="mb-1 text-[10px] text-zinc-700 uppercase tracking-widest font-medium">Result Handle</p>
+                <p className="truncate font-mono text-xs text-zinc-500">{execResult.resultHandle.slice(0, 18)}…</p>
+              </div>
             </div>
-            <div className="rounded-xl border border-white/[0.05] bg-black/25 px-4 py-3">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-700">Result Handle</p>
-              <p className="truncate font-mono text-xs text-zinc-500">{execResult.resultHandle.slice(0, 20)}…</p>
-            </div>
-          </div>
 
-          {/* Explanation */}
-          {explanation && (
-            <div className="rounded-xl border border-white/[0.05] bg-black/25 px-4 py-3">
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-700">Why</p>
-              <p className="text-sm leading-relaxed text-zinc-300">{explanation}</p>
-            </div>
-          )}
+            {/* Explanation */}
+            {explanation && (
+              <div className="rounded-lg border border-white/[0.05] bg-black/20 px-3 py-2.5">
+                <p className="mb-1 text-[10px] text-zinc-700 uppercase tracking-widest font-medium">Why</p>
+                <p className="text-sm leading-relaxed text-zinc-400">{explanation}</p>
+              </div>
+            )}
+
+            {/* Explorer link */}
+            {txHash && (
+              <a
+                href={`https://sepolia.arbiscan.io/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] py-3 text-sm font-semibold text-white transition hover:bg-white/[0.07] hover:border-white/[0.14]"
+              >
+                <svg viewBox="0 0 20 20" className="h-4 w-4 text-zinc-400" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 6H6a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2v-4m-4-4h6m0 0v6m0-6L9.5 11"/>
+                </svg>
+                View on Arbiscan
+                <span className="ml-1 font-mono text-xs text-zinc-600">{txHash.slice(0, 8)}…{txHash.slice(-6)}</span>
+              </a>
+            )}
+          </div>
         </div>
       )}
 
