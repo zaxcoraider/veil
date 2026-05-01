@@ -150,11 +150,13 @@ export async function createDeal(
   const { price: rawPrice } = await priceRes.json() as { price: number };
   const price = Math.round(rawPrice);
 
-  // 2. Encrypt amount
+  // 2. Encrypt amount — proof must be bound to VeilToken because
+  //    VeilToken.confidentialTransferFrom calls Nox.fromExternal internally.
   const { handle: amountHandle, handleProof: amountProof } =
-    await handleClient.encryptInput(BigInt(Math.round(params.amount * 1e18)), "uint256", params.contractAddress);
+    await handleClient.encryptInput(BigInt(Math.round(params.amount * 1e18)), "uint256", params.tokenAddress);
 
-  // 3. Encrypt threshold from condition
+  // 3. Encrypt threshold — proof bound to VeilDeal because createDeal calls
+  //    Nox.fromExternal directly.
   const match = params.condition.match(/(\d+(?:\.\d+)?)/);
   const threshold = match ? parseFloat(match[1]) : 0;
   if (!threshold) throw new Error("Could not extract price threshold from condition");
