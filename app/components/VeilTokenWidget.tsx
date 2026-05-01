@@ -28,6 +28,7 @@ export function VeilTokenWidget({ onBalanceUpdate }: { onBalanceUpdate?: (bal: s
   const [claimTx, setClaimTx]       = useState<string | null>(null);
   const [handle, setHandle]         = useState<`0x${string}` | null>(null);
   const [error, setError]           = useState<string | null>(null);
+  const [decryptHint, setDecryptHint] = useState<string>("Sign in wallet…");
 
   useEffect(() => {
     if (!isConnected || !address || !publicClient || !TOKEN_ADDRESS) return;
@@ -51,14 +52,25 @@ export function VeilTokenWidget({ onBalanceUpdate }: { onBalanceUpdate?: (bal: s
   async function revealBalance() {
     if (!walletClient || !handle) return;
     setState("decrypting");
+    setDecryptHint("Sign in wallet…");
     setError(null);
+    // Show progressive hints that match the retry delays in decryptVeilBalance
+    const hints = [
+      { delay: 3000,  text: "Waiting for gateway…" },
+      { delay: 8000,  text: "Retrying (1/3)…" },
+      { delay: 18000, text: "Retrying (2/3)…" },
+    ];
+    const timers = hints.map(({ delay, text }) =>
+      setTimeout(() => setDecryptHint(text), delay)
+    );
     try {
       const raw = await decryptVeilBalance(walletClient, handle);
-      const formatted = formatVeil(raw);
-      setBalance(formatted);
+      timers.forEach(clearTimeout);
+      setBalance(formatVeil(raw));
       setState("revealed");
-      onBalanceUpdate?.(formatted);
+      onBalanceUpdate?.(formatVeil(raw));
     } catch (e) {
+      timers.forEach(clearTimeout);
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[VeilTokenWidget] decrypt failed:", e);
       setError(msg.length > 80 ? msg.slice(0, 80) + "…" : msg);
@@ -110,9 +122,9 @@ export function VeilTokenWidget({ onBalanceUpdate }: { onBalanceUpdate?: (bal: s
           </button>
         )}
         {state === "decrypting" && (
-          <span className="flex items-center gap-1 text-xs text-violet-400" title="Check MetaMask — approve the signature request to decrypt">
+          <span className="flex items-center gap-1 text-xs text-violet-400" title="Approve the MetaMask signature then wait for the gateway">
             <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-500/30 border-t-violet-400" />
-            Sign in wallet…
+            {decryptHint}
           </span>
         )}
         {state === "revealed" && balance !== null && (
