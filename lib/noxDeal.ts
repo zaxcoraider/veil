@@ -197,7 +197,7 @@ export async function createDeal(
     functionName: "dealCount",
   }) as bigint;
 
-  const dealId: bigint = dealCount - 1n;
+  const dealId: bigint = dealCount - BigInt(1);
 
   // 6. Get resultHandle from getDeal
   const deal = await publicClient.readContract({
