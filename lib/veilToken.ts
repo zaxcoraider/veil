@@ -53,19 +53,17 @@ export async function decryptVeilBalance(
   handle:       `0x${string}`
 ): Promise<bigint> {
   const handleClient = await createViemHandleClient(walletClient);
-  // The Nox gateway may lag 1-2 blocks behind local RPC after a fresh mint.
-  // Retry up to 4 times with increasing delays before giving up.
-  const delays = [0, 5000, 10000, 15000];
+  // The Nox gateway indexes ACL entries ~15s after tx confirms.
+  // Retry every 3s for up to 30s so we succeed as soon as it's ready.
   let lastError: unknown;
-  for (const delay of delays) {
-    if (delay > 0) await new Promise<void>(r => setTimeout(r, delay));
+  for (let i = 0; i < 10; i++) {
+    if (i > 0) await new Promise<void>(r => setTimeout(r, 3000));
     try {
       const { value } = await handleClient.decrypt(handle);
       return value as bigint;
     } catch (e) {
       lastError = e;
       const msg = e instanceof Error ? e.message : String(e);
-      // Only retry on gateway 401 — other errors are fatal.
       if (!msg.includes("401")) throw e;
     }
   }

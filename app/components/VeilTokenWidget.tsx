@@ -54,11 +54,10 @@ export function VeilTokenWidget({ onBalanceUpdate }: { onBalanceUpdate?: (bal: s
     setState("decrypting");
     setDecryptHint("Sign in wallet…");
     setError(null);
-    // Show progressive hints that match the retry delays in decryptVeilBalance
+    // Hints shown after 4s and 10s to indicate gateway sync wait
     const hints = [
-      { delay: 3000,  text: "Waiting for gateway…" },
-      { delay: 8000,  text: "Retrying (1/3)…" },
-      { delay: 18000, text: "Retrying (2/3)…" },
+      { delay: 4000,  text: "Waiting for gateway…" },
+      { delay: 10000, text: "Almost there…" },
     ];
     const timers = hints.map(({ delay, text }) =>
       setTimeout(() => setDecryptHint(text), delay)
