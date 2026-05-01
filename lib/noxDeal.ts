@@ -1,7 +1,6 @@
 "use client";
 
 import { createViemHandleClient } from "@iexec-nox/handle";
-import { decodeEventLog } from "viem";
 import type { PublicClient, WalletClient } from "viem";
 
 export const VEIL_DEAL_ABI = [
@@ -11,7 +10,6 @@ export const VEIL_DEAL_ABI = [
     stateMutability: "nonpayable",
     inputs: [
       { name: "amountHandle",    type: "bytes32" },
-      { name: "amountProof",     type: "bytes"   },
       { name: "thresholdHandle", type: "bytes32" },
       { name: "thresholdProof",  type: "bytes"   },
       { name: "counterparty",    type: "address" },
@@ -88,12 +86,27 @@ const VEIL_TOKEN_OPERATOR_ABI = [
   },
 ] as const;
 
+const VEIL_TOKEN_PREPARE_ABI = [
+  {
+    name: "prepareTransfer",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "amount",      type: "bytes32" },
+      { name: "proof",       type: "bytes"   },
+      { name: "beneficiary", type: "address" },
+    ],
+    outputs: [{ name: "handle", type: "bytes32" }],
+  },
+] as const;
+
 export type DealParams = {
   amount:          number;
   counterparty:    `0x${string}`;
   condition:       string;
   contractAddress: `0x${string}`;
   tokenAddress:    `0x${string}`;
+  onProgress?:     (stage: "encrypting" | "preparing" | "locking" | "evaluating") => void;
 };
 
 export type DealResult = {
@@ -150,30 +163,41 @@ export async function createDeal(
   const { price: rawPrice } = await priceRes.json() as { price: number };
   const price = Math.round(rawPrice);
 
-  // Nox.fromExternal validates proof against msg.sender at the point of the call:
-  //   amountHandle  → passed through veilToken.confidentialTransferFrom (external call),
-  //                   so inside VeilToken msg.sender = VeilDeal → bind to DEAL address.
-  //   thresholdHandle → Nox.fromExternal called directly inside VeilDeal (internal lib),
-  //                   so msg.sender = user's EOA → bind to user's wallet address.
-  const [userAddress] = await walletClient.getAddresses();
-
-  // 2. Encrypt amount — bound to VeilDeal (msg.sender seen by VeilToken = VeilDeal)
+  // 2. Encrypt amount — bound to VeilToken (user calls prepareTransfer directly,
+  //    so msg.sender seen by VeilToken = user, appInProof must = VeilToken address)
+  params.onProgress?.("encrypting");
   const { handle: amountHandle, handleProof: amountProof } =
-    await handleClient.encryptInput(BigInt(Math.round(params.amount * 1e18)), "uint256", params.contractAddress);
+    await handleClient.encryptInput(BigInt(Math.round(params.amount * 1e18)), "uint256", params.tokenAddress);
 
-  // 3. Encrypt threshold — bound to user's EOA (msg.sender seen by Nox lib inside VeilDeal = user)
+  // 3. Call VeilToken.prepareTransfer — user is msg.sender, grants ACL access to VeilDeal.
+  //    This sidesteps the multi-hop proof-binding issue: ownerInProof = user, appInProof = VeilToken.
+  params.onProgress?.("preparing");
+  const prepTx = await walletClient.writeContract({
+    chain:        walletClient.chain   ?? null,
+    account:      walletClient.account ?? null,
+    address:      params.tokenAddress,
+    abi:          VEIL_TOKEN_PREPARE_ABI,
+    functionName: "prepareTransfer",
+    args:         [amountHandle as `0x${string}`, amountProof as `0x${string}`, params.contractAddress],
+  });
+  const prepReceipt = await publicClient.waitForTransactionReceipt({ hash: prepTx });
+  if (prepReceipt.status === "reverted") {
+    throw new Error("prepareTransfer reverted — check Arbiscan for details.");
+  }
+
+  // 4. Encrypt threshold — bound to VeilDeal (Nox.fromExternal called inside VeilDeal as library,
+  //    so msg.sender = user's EOA, appInProof must = VeilDeal address)
   const match = params.condition.match(/(\d+(?:\.\d+)?)/);
   const threshold = match ? parseFloat(match[1]) : 0;
   if (!threshold) throw new Error("Could not extract price threshold from condition");
 
   const { handle: thresholdHandle, handleProof: thresholdProof } =
-    await handleClient.encryptInput(BigInt(Math.round(threshold)), "uint256", userAddress);
+    await handleClient.encryptInput(BigInt(Math.round(threshold)), "uint256", params.contractAddress);
 
   const checkLt = params.condition.includes("<") || !params.condition.includes(">");
 
   const callArgs = [
     amountHandle    as `0x${string}`,
-    amountProof     as `0x${string}`,
     thresholdHandle as `0x${string}`,
     thresholdProof  as `0x${string}`,
     params.counterparty,
@@ -181,7 +205,8 @@ export async function createDeal(
     checkLt,
   ] as const;
 
-  // 4. Simulate first to surface the exact revert reason before paying gas
+  // 5. Simulate to surface revert reason before paying gas
+  params.onProgress?.("locking");
   try {
     await publicClient.simulateContract({
       address:      params.contractAddress,
@@ -195,7 +220,7 @@ export async function createDeal(
     throw new Error(`Simulation failed: ${msg}`);
   }
 
-  // 5. Submit on-chain
+  // 6. Submit on-chain
   const txHash = await walletClient.writeContract({
     chain:        walletClient.chain   ?? null,
     account:      walletClient.account ?? null,
@@ -213,7 +238,7 @@ export async function createDeal(
     );
   }
 
-  // 5. Get dealId from dealCount (most reliable — avoids event parsing issues)
+  // 7. Get dealId from dealCount (most reliable — avoids event parsing issues)
   const dealCount = await publicClient.readContract({
     address:      params.contractAddress,
     abi:          VEIL_DEAL_ABI,
@@ -222,7 +247,7 @@ export async function createDeal(
 
   const dealId: bigint = dealCount - BigInt(1);
 
-  // 6. Get resultHandle from getDeal
+  // 8. Get resultHandle from getDeal
   const deal = await publicClient.readContract({
     address:      params.contractAddress,
     abi:          VEIL_DEAL_ABI,
@@ -232,7 +257,8 @@ export async function createDeal(
 
   const resultHandle: `0x${string}` = deal.resultHandle;
 
-  // 6. Poll TEE for result
+  // 9. Poll TEE for result
+  params.onProgress?.("evaluating");
   let execute: boolean | undefined;
   for (let i = 0; i < 30; i++) {
     try {

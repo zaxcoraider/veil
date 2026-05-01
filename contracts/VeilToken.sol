@@ -2,17 +2,8 @@
 pragma solidity ^0.8.28;
 
 import {ERC7984} from "@iexec-nox/nox-confidential-contracts/contracts/token/ERC7984.sol";
-import {Nox, euint256} from "@iexec-nox/nox-protocol-contracts/contracts/sdk/Nox.sol";
+import {Nox, euint256, externalEuint256} from "@iexec-nox/nox-protocol-contracts/contracts/sdk/Nox.sol";
 
-/**
- * VeilToken — ERC-7984 confidential reward token for the Veil protocol.
- *
- * Every time a user submits a confidential trading intent via VeilExecutor,
- * they earn 1 VEIL. Balances are encrypted on-chain; only the holder can
- * decrypt their own balance via the Nox Gateway SDK.
- *
- * Faucet: any testnet user can claim 10 VEIL once for demo purposes.
- */
 contract VeilToken is ERC7984 {
 
     address public owner;
@@ -38,10 +29,6 @@ contract VeilToken is ERC7984 {
         emit ExecutorUpdated(_executor);
     }
 
-    /**
-     * Mint 1 VEIL reward to a user. Only callable by the approved VeilExecutor.
-     * Called automatically on every successful intent submission.
-     */
     function rewardMint(address to) external {
         require(msg.sender == executor, "VeilToken: not executor");
         euint256 amount = Nox.toEuint256(REWARD_AMOUNT);
@@ -50,9 +37,6 @@ contract VeilToken is ERC7984 {
         _mint(to, amount);
     }
 
-    /**
-     * Testnet faucet — claim 10 VEIL once per address to try the protocol.
-     */
     function faucet() external {
         require(!hasClaimed[msg.sender], "VeilToken: already claimed");
         hasClaimed[msg.sender] = true;
@@ -60,5 +44,24 @@ contract VeilToken is ERC7984 {
         Nox.allowThis(amount);
         Nox.allow(amount, msg.sender);
         _mint(msg.sender, amount);
+    }
+
+    /**
+     * Validate an external encrypted amount and grant ACL access to a beneficiary
+     * contract (e.g. VeilDeal) so it can use the handle in confidentialTransferFrom.
+     *
+     * User calls this directly — msg.sender = user — so the Nox proof validates:
+     *   appInProof  = address(this) = VeilToken  (NoxCompute caller)
+     *   ownerInProof = msg.sender  = user         (SDK owner)
+     */
+    function prepareTransfer(
+        externalEuint256 amount,
+        bytes calldata   proof,
+        address          beneficiary
+    ) external returns (euint256 handle) {
+        handle = Nox.fromExternal(amount, proof);
+        Nox.allowThis(handle);
+        Nox.allow(handle, msg.sender);
+        Nox.allow(handle, beneficiary);
     }
 }

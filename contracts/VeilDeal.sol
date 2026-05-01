@@ -5,7 +5,7 @@ import {Nox, euint256, externalEuint256, ebool} from "@iexec-nox/nox-protocol-co
 import "encrypted-types/EncryptedTypes.sol";
 
 interface IVeilToken {
-    function confidentialTransferFrom(address from, address to, externalEuint256 encryptedAmount, bytes calldata inputProof) external returns (euint256);
+    function confidentialTransferFrom(address from, address to, euint256 amount) external returns (euint256);
     function confidentialTransfer(address to, euint256 amount) external returns (euint256);
     function rewardMint(address to) external;
     function setOperator(address operator, uint48 until) external;
@@ -67,17 +67,15 @@ contract VeilDeal {
     /**
      * Create a confidential deal.
      *
-     * @param amountHandle     Encrypted VEIL amount (from Nox Gateway SDK)
-     * @param amountProof      EIP-712 proof for amountHandle
-     * @param thresholdHandle  Encrypted price threshold
+     * @param amountHandle     Pre-authorized euint256 handle (from VeilToken.prepareTransfer)
+     * @param thresholdHandle  Encrypted price threshold (externalEuint256)
      * @param thresholdProof   EIP-712 proof for thresholdHandle
      * @param counterparty     Who receives VEIL if condition is met
      * @param currentPrice     Live market price (public)
      * @param checkLt          true = execute if price < threshold (buy signal)
      */
     function createDeal(
-        externalEuint256 amountHandle,
-        bytes calldata   amountProof,
+        euint256         amountHandle,
         externalEuint256 thresholdHandle,
         bytes calldata   thresholdProof,
         address          counterparty,
@@ -88,10 +86,10 @@ contract VeilDeal {
         require(counterparty != msg.sender,   "VeilDeal: self-deal");
 
         // ── Lock VEIL ──────────────────────────────────────────────────────────
-        // Transfer encrypted amount from creator → this contract.
+        // amountHandle is pre-authorized via VeilToken.prepareTransfer — no proof needed.
         // Requires creator to have called veilToken.setOperator(address(this), expiry).
         euint256 locked = veilToken.confidentialTransferFrom(
-            msg.sender, address(this), amountHandle, amountProof
+            msg.sender, address(this), amountHandle
         );
         Nox.allowThis(locked);
         Nox.allow(locked, msg.sender);

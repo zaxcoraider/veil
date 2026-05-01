@@ -15,16 +15,17 @@ import { generateExplanation } from "@/lib/explainResult";
 const DEAL_ADDRESS  = (process.env.NEXT_PUBLIC_VEIL_DEAL  ?? "") as `0x${string}`;
 const TOKEN_ADDRESS = (process.env.NEXT_PUBLIC_VEIL_TOKEN ?? "") as `0x${string}`;
 
-type Step = "idle" | "approving" | "encrypting" | "locking" | "evaluating" | "done" | "settling" | "settled" | "error";
+type Step = "idle" | "approving" | "encrypting" | "preparing" | "locking" | "evaluating" | "done" | "settling" | "settled" | "error";
 
-const STEP_ORDER: Step[] = ["approving", "encrypting", "locking", "evaluating", "done"];
+const STEP_ORDER: Step[] = ["approving", "encrypting", "preparing", "locking", "evaluating", "done"];
 
 const STEP_META: Record<string, { label: string; active: string; done: string }> = {
-  approving:  { label: "Approve",  active: "Approving VeilDeal as operator…",     done: "Operator approved"           },
-  encrypting: { label: "Encrypt",  active: "Sealing amount + threshold in TEE…",  done: "Values encrypted via Nox"    },
-  locking:    { label: "Lock",     active: "Locking VEIL in confidential escrow…", done: "VEIL locked on-chain"        },
-  evaluating: { label: "Evaluate", active: "SGX enclave evaluating condition…",    done: "TEE result received"         },
-  done:       { label: "Result",   active: "Publishing result…",                   done: "Deal ready to settle"        },
+  approving:  { label: "Approve",  active: "Approving VeilDeal as operator…",         done: "Operator approved"           },
+  encrypting: { label: "Encrypt",  active: "Sealing amount + threshold in TEE…",      done: "Values encrypted via Nox"    },
+  preparing:  { label: "Prepare",  active: "Pre-authorizing encrypted transfer…",     done: "Transfer pre-authorized"     },
+  locking:    { label: "Lock",     active: "Locking VEIL in confidential escrow…",    done: "VEIL locked on-chain"        },
+  evaluating: { label: "Evaluate", active: "SGX enclave evaluating condition…",       done: "TEE result received"         },
+  done:       { label: "Result",   active: "Publishing result…",                      done: "Deal ready to settle"        },
 };
 
 const QUICK_EXAMPLES = [
@@ -119,21 +120,15 @@ export function DealForm() {
         await approveOperator(walletClient, publicClient, TOKEN_ADDRESS, DEAL_ADDRESS);
       }
 
-      // Step 2: Encrypt
+      // Steps 2-5 are driven by the onProgress callback inside createDeal
       setStep("encrypting");
-
-      // Step 3: Lock + create deal (encrypting and locking happen inside createDeal)
-      setStep("locking");
-
-      // Step 4: TEE evaluate
-      setStep("evaluating");
-
       const dealResult = await createDeal(walletClient, publicClient, {
         amount:          parseFloat(amount),
         counterparty:    counterparty as `0x${string}`,
         condition:       intent,
         contractAddress: DEAL_ADDRESS,
         tokenAddress:    TOKEN_ADDRESS,
+        onProgress:      (stage) => setStep(stage),
       });
 
       setResult(dealResult);
