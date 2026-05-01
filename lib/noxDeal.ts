@@ -124,7 +124,7 @@ export async function approveOperator(
   tokenAddress:  `0x${string}`,
   dealAddress:   `0x${string}`
 ): Promise<`0x${string}`> {
-  const expiry = BigInt(Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30); // 30 days
+  const expiry = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30; // 30 days
   const hash = await walletClient.writeContract({
     chain:        walletClient.chain   ?? null,
     account:      walletClient.account ?? null,
