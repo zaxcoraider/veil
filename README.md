@@ -1,91 +1,208 @@
-# Veil — Confidential Intent Execution Layer
+# Veil — Confidential Escrow on ERC-7984
 
 > **iExec Vibe Coding Challenge · DoraHacks · May 2026**  
-> Live at **[veil-six.vercel.app](https://veil-six.vercel.app)** · Arbitrum Sepolia testnet
-
-Submit natural-language trading intents where your price threshold is sealed inside a **real Intel SGX/TDX enclave** via iExec Nox. The condition never touches the blockchain — only the boolean result is published on-chain after TEE attestation.
+> Live at **[veil-six.vercel.app](https://veil-six.vercel.app)** · Arbitrum Sepolia
 
 ---
 
-## How it works
+## What is Veil?
+
+Veil is a confidential escrow engine built on the iExec Nox Protocol and the ERC-7984 confidential token standard.
+
+Two parties enter a deal: one locks VEIL tokens with a hidden price condition (e.g. "pay if ETH drops below 2000"). An Intel SGX enclave evaluates the condition privately. Based on the result, funds automatically route to the counterparty or return to the creator — **without either party ever revealing the amount or threshold on-chain.**
+
+---
+
+## Why build this?
+
+Every existing on-chain escrow or conditional payment protocol exposes its logic in plaintext. Anyone watching the blockchain knows:
+- How much is locked
+- What the trigger condition is
+- Who wins before it settles
+
+This leaks trading strategy, negotiation leverage, and financial intent to competitors and front-runners.
+
+Veil solves this by keeping **both the amount and the condition encrypted** inside a Trusted Execution Environment. The blockchain only ever sees opaque `bytes32` handles and a final boolean. Nothing is revealed until a party decrypts their own balance.
+
+---
+
+## Architecture
 
 ```
-User: "Buy ETH if price drops below 2000"
-         │
-         ▼
-  ① Parse  — ChainGPT extracts action / asset / condition (regex fallback)
-         │
-         ▼
-  ② Encrypt — Nox Gateway seals the threshold inside Intel TDX
-         │     encryptInput(2000n, "uint256", VeilExecutor)
-         │     → handle (bytes32)  +  handleProof (EIP-712)
-         │     Plaintext never leaves the Nox network.
-         │
-         ▼
-  ③ Evaluate — VeilExecutor.submitIntent(handle, proof, price, checkLt)
-         │     Nox.fromExternal()        validates the Gateway signature
-         │     Nox.lt(price, threshold)  NoxCompute → real SGX workers
-         │     Nox.allowPublicDecryption() marks result publicly readable
-         │
-         ▼
-  ④ Result — handleClient.publicDecrypt(resultHandle) → true / false
-         │
-         ▼
-  "Trade Executed — ETH price ($2,335) dropped below your $2,350 threshold."
-  [View on Arbiscan ↗]
+┌─────────────────────────────────────────────────────────────────┐
+│                         USER (Browser)                          │
+│                                                                 │
+│  1. Type condition: "Pay if ETH drops below 2000"               │
+│  2. Enter VEIL amount + counterparty address                    │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Nox Gateway (TEE KMS)                       │
+│                                                                 │
+│  encryptInput(amount,    VeilToken)  → amountHandle    + proof  │
+│  encryptInput(threshold, VeilDeal)   → thresholdHandle + proof  │
+│                                                                 │
+│  Plaintext never leaves the KMS. Handles are opaque bytes32.   │
+└──────────────┬──────────────────────────────┬───────────────────┘
+               │                              │
+               ▼                              ▼
+┌──────────────────────────┐   ┌──────────────────────────────────┐
+│  VeilToken (ERC-7984)    │   │  VeilDeal (Escrow Engine)        │
+│                          │   │                                  │
+│  prepareTransfer(        │   │  createDeal(                     │
+│    amountHandle,         │   │    amountHandle,   ← euint256    │
+│    amountProof,          │   │    thresholdHandle,← external    │
+│    VeilDeal              │   │    thresholdProof,               │
+│  )                       │   │    counterparty,                 │
+│                          │   │    currentPrice,                 │
+│  → validates proof       │   │    checkLt                       │
+│  → grants ACL to VeilDeal│   │  )                               │
+│  → returns euint256      │   │                                  │
+│    handle                │   │  → confidentialTransferFrom()    │
+└──────────────────────────┘   │    locks VEIL in contract        │
+                               │  → Nox.fromExternal() validates  │
+                               │    threshold proof in SGX        │
+                               │  → Nox.lt/gt(price, threshold)   │
+                               │    runs inside Intel SGX enclave │
+                               │  → stores ebool result handle    │
+                               └──────────────┬───────────────────┘
+                                              │
+                                              ▼
+                               ┌──────────────────────────────────┐
+                               │  NoxCompute (iExec, on-chain)    │
+                               │                                  │
+                               │  SGX workers evaluate:           │
+                               │  lt(encPrice, encThreshold)      │
+                               │  → encrypted boolean result      │
+                               └──────────────┬───────────────────┘
+                                              │
+                                              ▼
+                               ┌──────────────────────────────────┐
+                               │  publicDecrypt(resultHandle)     │
+                               │  → true / false                  │
+                               │                                  │
+                               │  settleDeal()                    │
+                               │  → Nox.select(result,            │
+                               │      toCounterparty, toCreator)  │
+                               │  → funds route privately         │
+                               └──────────────────────────────────┘
 ```
 
-**The contract never sees the plaintext threshold. The comparison runs inside a real Intel SGX enclave. Only the boolean result is ever public.**
+---
+
+## Full User Flow
+
+| Step | What Happens | Visible On-Chain |
+|---|---|---|
+| 1. Claim VEIL | Faucet mints 10 ERC-7984 tokens | ✓ tx hash |
+| 2. Approve operator | VeilDeal granted operator rights on VeilToken | ✓ tx hash |
+| 3. Pre-authorize | `prepareTransfer` seals amount, grants ACL to VeilDeal | ✓ tx hash |
+| 4. Create deal | `createDeal` locks VEIL, submits encrypted condition to SGX | ✓ tx hash |
+| 5. TEE evaluates | SGX enclave compares encrypted price vs encrypted threshold | ✗ private |
+| 6. Settle | `settleDeal` routes funds based on boolean result | ✓ tx hash |
+| 7. Decrypt balance | Each party privately decrypts their own ERC-7984 balance | ✗ private |
+
+**Amount, threshold, and individual balances are never revealed on-chain at any step.**
+
+---
+
+## Key Technical Challenge: Proof Binding
+
+iExec Nox validates encrypted inputs via `validateInputProof`, which checks:
+- `appInProof == msg.sender` (the contract calling NoxCompute)
+- `ownerInProof == owner` (the transaction originator)
+
+This breaks when contracts call each other — if VeilDeal calls VeilToken which calls NoxCompute, the `ownerInProof` no longer matches. The fix is the `prepareTransfer` pattern: the user calls VeilToken directly, so the proof chain is:
+
+```
+User → VeilToken.prepareTransfer → NoxCompute
+       msg.sender = User ✓          appInProof = VeilToken ✓
+```
+
+VeilDeal then uses the pre-authorized `euint256` handle via `confidentialTransferFrom(address, address, euint256)` — no proof needed for that hop.
+
+---
+
+## Smart Contracts (Arbitrum Sepolia)
+
+| Contract | Address | Role |
+|---|---|---|
+| VeilToken | `0x6e9fe0077025fb7fe01a76bdd5a8606de87a68c0` | ERC-7984 confidential token |
+| VeilDeal | `0x16368c22f7a1ff791afc29756d238f5889415637` | Confidential escrow engine |
+| VeilExecutor | `0xc294020ffe9a82acb332041d25f9a76597682f35` | Reward minter |
+| NoxCompute (iExec) | `0xd464B198f06756a1d00be223634b85E0a731c229` | SGX computation layer |
 
 ---
 
 ## Stack
 
-| Layer | Tech |
+| Layer | Technology |
 |---|---|
 | Frontend | Next.js 16 · Tailwind CSS 4 · wagmi v3 · viem |
-| TEE | iExec Nox (`@iexec-nox/handle`) · Intel SGX / TDX |
-| Smart contract | Solidity · Hardhat v3 · Arbitrum Sepolia |
-| AI parsing | ChainGPT SSE streaming (regex fallback) |
-| Price feed | CoinGecko (CoinCap fallback) |
+| Confidential token | ERC-7984 (`@iexec-nox/nox-confidential-contracts`) |
+| TEE | iExec Nox Protocol (`@iexec-nox/handle`) · Intel SGX / TDX |
+| Smart contracts | Solidity 0.8.28 · Hardhat v3 · Arbitrum Sepolia |
+| AI parsing | ChainGPT SSE streaming · regex fallback |
+| Price feed | CoinGecko · CoinCap fallback |
 
 ---
 
-## Contracts (Arbitrum Sepolia)
+## Project Structure
 
-| Contract | Address |
-|---|---|
-| VeilExecutor | `0xb3f82113188d8a867fb7e5ac79fb1f1cd3670dc2` |
-| VeilVault | `0x94a124c4a73ff6bebbb58f795fba61d4d399f092` |
-| NoxCompute (iExec) | `0xd464B198f06756a1d00be223634b85E0a731c229` |
+```
+veil/
+├── app/
+│   ├── api/
+│   │   ├── parse-intent/route.ts     ChainGPT SSE + regex fallback
+│   │   └── price/route.ts            Live ETH price (CoinGecko + CoinCap)
+│   ├── components/
+│   │   ├── ConnectButton.tsx          Wallet connect (wagmi)
+│   │   ├── DealForm.tsx               5-step pipeline UI
+│   │   └── VeilTokenWidget.tsx        ERC-7984 balance + faucet
+│   ├── page.tsx
+│   ├── providers.tsx                  WagmiProvider + QueryClientProvider
+│   └── layout.tsx
+├── lib/
+│   ├── noxDeal.ts                     createDeal / settleDeal / prepareTransfer
+│   ├── veilToken.ts                   Faucet, encrypted balance, decrypt
+│   ├── explainResult.ts               Human-readable result explanation
+│   └── wagmi.ts                       Wagmi config — Arbitrum Sepolia
+├── contracts/
+│   ├── VeilToken.sol                  ERC-7984 + faucet + prepareTransfer
+│   ├── VeilDeal.sol                   Confidential escrow + TEE comparison
+│   └── VeilExecutor.sol               Reward minting (rewardMint)
+└── scripts/
+    └── deploy.ts                      Standalone viem deploy script
+```
 
 ---
 
-## Local development
+## Local Development
 
 ```bash
 npm install
-cp .env.example .env.local   # fill DEPLOYER_PRIVATE_KEY + CHAINGPT_API_KEY
+cp .env.example .env.local   # fill in the variables below
 npm run dev                  # http://localhost:3000
 ```
 
-### Environment variables
+### Environment Variables
 
-| Variable | Required | Notes |
+| Variable | Required | Description |
 |---|---|---|
-| `NEXT_PUBLIC_VEIL_CONTRACT` | Yes | VeilExecutor address (deployed — see above) |
+| `NEXT_PUBLIC_VEIL_TOKEN` | Yes | VeilToken contract address |
+| `NEXT_PUBLIC_VEIL_DEAL` | Yes | VeilDeal contract address |
+| `NEXT_PUBLIC_VEIL_CONTRACT` | Yes | VeilExecutor contract address |
 | `CHAINGPT_API_KEY` | No | Falls back to regex parser if empty |
-| `DEPLOYER_PRIVATE_KEY` | Deploy only | Never commit |
+| `DEPLOYER_PRIVATE_KEY` | Deploy only | Never commit to git |
 | `ARB_SEPOLIA_RPC` | No | Defaults to public Arbitrum Sepolia RPC |
 
----
-
-## Redeploy contracts
+### Redeploy Contracts
 
 ```bash
 npx hardhat compile
-npx tsx scripts/deploy.ts    # requires DEPLOYER_PRIVATE_KEY in .env.local
-# update NEXT_PUBLIC_VEIL_CONTRACT in Vercel dashboard
+npx tsx scripts/deploy.ts
+# update the three NEXT_PUBLIC_* vars in Vercel dashboard
 ```
 
 Testnet ETH faucets:
@@ -94,50 +211,20 @@ Testnet ETH faucets:
 
 ---
 
-## Project structure
+## What Makes This Different
 
-```
-veil/
-├── app/
-│   ├── api/
-│   │   ├── parse-intent/route.ts   ChainGPT SSE + regex fallback
-│   │   └── price/route.ts          Live ETH price (CoinGecko + CoinCap)
-│   ├── components/
-│   │   ├── ConnectButton.tsx        wagmi wallet connect
-│   │   └── IntentForm.tsx           4-step pipeline UI
-│   ├── page.tsx                     Main page layout
-│   ├── providers.tsx                WagmiProvider + QueryClientProvider
-│   └── layout.tsx
-├── lib/
-│   ├── wagmi.ts                     wagmi config — Arbitrum Sepolia, ssr: true
-│   ├── noxEncrypt.ts                Nox Gateway encryption (encryptInput)
-│   ├── noxExecute.ts                submitIntent on-chain + publicDecrypt polling
-│   └── explainResult.ts             Human-readable result explanation
-├── contracts/
-│   ├── VeilExecutor.sol             Nox.fromExternal + Nox.lt/gt + allowPublicDecryption
-│   └── VeilVault.sol                ETH custody with executor gate
-└── scripts/
-    └── deploy.ts                    Standalone viem deploy script
-```
+**Real TEE, not simulated.** The threshold comparison runs inside a real Intel SGX/TDX enclave via iExec's deployed NoxCompute contract — not mocked, not homomorphic encryption, not a trusted oracle.
 
----
+**Both sides stay private.** Most "confidential" DeFi protocols hide one side (e.g. commit-reveal). Veil keeps the amount AND the condition encrypted through the entire lifecycle using ERC-7984 `euint256` handles.
 
-## Key design decisions
+**The prepareTransfer pattern.** Solving the multi-hop proof-binding constraint in Nox Protocol — where `validateInputProof` breaks across contract call chains — required a novel intermediate authorization step. This is not in any documentation or example code.
 
-**Real Nox TEE** — Uses `@iexec-nox/handle` `createViemHandleClient`. The threshold is encrypted by the Nox Gateway's KMS (Intel TDX). `Nox.lt/gt()` triggers real SGX computation via iExec's deployed NoxCompute contract on Arbitrum Sepolia.
-
-**Zero plaintext on-chain** — `VeilExecutor` receives only an opaque `bytes32` handle + an EIP-712 proof. The comparison result is an `ebool` — the actual boolean only becomes readable via `publicDecrypt` after TEE evaluation.
-
-**Explorer link** — After each execution the UI shows a direct Arbiscan link to the `submitIntent` transaction so the result can be independently verified.
-
-**Live price feed** — `/api/price` fetches real ETH/USD from CoinGecko (CoinCap fallback). No hardcoded values.
-
-**ChainGPT with fallback** — Pipeline degrades gracefully without an API key; the UI badge shows which path ran.
+**Fully on-chain settlement.** No off-chain relayer, no centralized resolver. `settleDeal` is permissionless — anyone can trigger it once the TEE result is available.
 
 ---
 
 ## Hackathon
 
 **Event:** [iExec Vibe Coding Challenge](https://dorahacks.io/hackathon/vibe-coding-iexec/detail) · DoraHacks  
-**Deadline:** May 1, 2026  
-**Why Veil fits:** Uses the real Nox SDK, the real NoxCompute contract on Arbitrum Sepolia, real ChainGPT parsing, and live market data. End-to-end — nothing simulated.
+**Track:** ERC-7984 + Nox Protocol (TEE, not FHE/OZ/Zama)  
+**Deployed:** Arbitrum Sepolia · Live at [veil-six.vercel.app](https://veil-six.vercel.app)
