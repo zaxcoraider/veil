@@ -150,19 +150,24 @@ export async function createDeal(
   const { price: rawPrice } = await priceRes.json() as { price: number };
   const price = Math.round(rawPrice);
 
-  // 2. Encrypt amount — proof must be bound to VeilToken because
-  //    VeilToken.confidentialTransferFrom calls Nox.fromExternal internally.
-  const { handle: amountHandle, handleProof: amountProof } =
-    await handleClient.encryptInput(BigInt(Math.round(params.amount * 1e18)), "uint256", params.tokenAddress);
+  // Nox.fromExternal validates proof against msg.sender at the point of the call:
+  //   amountHandle  → passed through veilToken.confidentialTransferFrom (external call),
+  //                   so inside VeilToken msg.sender = VeilDeal → bind to DEAL address.
+  //   thresholdHandle → Nox.fromExternal called directly inside VeilDeal (internal lib),
+  //                   so msg.sender = user's EOA → bind to user's wallet address.
+  const [userAddress] = await walletClient.getAddresses();
 
-  // 3. Encrypt threshold — proof bound to VeilDeal because createDeal calls
-  //    Nox.fromExternal directly.
+  // 2. Encrypt amount — bound to VeilDeal (msg.sender seen by VeilToken = VeilDeal)
+  const { handle: amountHandle, handleProof: amountProof } =
+    await handleClient.encryptInput(BigInt(Math.round(params.amount * 1e18)), "uint256", params.contractAddress);
+
+  // 3. Encrypt threshold — bound to user's EOA (msg.sender seen by Nox lib inside VeilDeal = user)
   const match = params.condition.match(/(\d+(?:\.\d+)?)/);
   const threshold = match ? parseFloat(match[1]) : 0;
   if (!threshold) throw new Error("Could not extract price threshold from condition");
 
   const { handle: thresholdHandle, handleProof: thresholdProof } =
-    await handleClient.encryptInput(BigInt(Math.round(threshold)), "uint256", params.contractAddress);
+    await handleClient.encryptInput(BigInt(Math.round(threshold)), "uint256", userAddress);
 
   const checkLt = params.condition.includes("<") || !params.condition.includes(">");
 
