@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.28;
 
 import {Nox} from "@iexec-nox/nox-protocol-contracts/contracts/sdk/Nox.sol";
 import "encrypted-types/EncryptedTypes.sol";
+
+interface IVeilToken {
+    function rewardMint(address to) external;
+}
 
 /**
  * VeilExecutor — Confidential intent execution on iExec Nox.
@@ -13,11 +17,14 @@ import "encrypted-types/EncryptedTypes.sol";
  *  3. Contract validates the proof and calls Nox.lt/gt() → NoxCompute emits event.
  *  4. Real SGX TEE workers compute price OP threshold privately.
  *  5. Result handle is publicly decryptable via handleClient.publicDecrypt().
+ *  6. 1 VEIL (ERC-7984 confidential token) is minted to the caller as a reward.
  *
  * The contract never sees the plaintext threshold.
  * Only a boolean result is ever made public, after TEE attestation.
  */
 contract VeilExecutor {
+
+    address public veilToken;
 
     struct Intent {
         address  user;
@@ -29,12 +36,22 @@ contract VeilExecutor {
 
     mapping(bytes32 => Intent) public intents;
 
+    event VeilTokenUpdated(address indexed token);
     event IntentSubmitted(
         address indexed user,
         bytes32 indexed resultHandle,
         uint256 price,
         bool    checkLt
     );
+
+    constructor(address _veilToken) {
+        veilToken = _veilToken;
+    }
+
+    function setVeilToken(address _veilToken) external {
+        veilToken = _veilToken;
+        emit VeilTokenUpdated(_veilToken);
+    }
 
     /**
      * Submit a confidential trading intent.
@@ -83,6 +100,11 @@ contract VeilExecutor {
         });
 
         emit IntentSubmitted(msg.sender, resultHandle, currentPrice, checkLt);
+
+        // Reward the user with 1 VEIL (ERC-7984 confidential token).
+        if (veilToken != address(0)) {
+            IVeilToken(veilToken).rewardMint(msg.sender);
+        }
     }
 
     function getIntent(bytes32 resultHandle) external view returns (Intent memory) {

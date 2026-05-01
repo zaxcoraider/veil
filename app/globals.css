@@ -1,12 +1,10 @@
 @import "tailwindcss";
 
-/* ── Fonts ───────────────────────────────────────────────────────────────── */
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-/* ── Base ────────────────────────────────────────────────────────────────── */
 body {
   background: #04040a;
   color: #f4f4f5;
@@ -14,7 +12,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Animated background mesh ────────────────────────────────────────────── */
+/* ── Animated background ─────────────────────────────────────────────────── */
 .bg-mesh {
   background:
     radial-gradient(ellipse 80% 60% at 20% 0%,   rgba(109, 40, 217, 0.18) 0%, transparent 60%),
@@ -23,18 +21,27 @@ body {
     #04040a;
 }
 
-/* ── Dot grid overlay ────────────────────────────────────────────────────── */
 .bg-grid {
-  background-image: radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-image: radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1px);
   background-size: 28px 28px;
 }
 
-/* ── Glow ring on cards ──────────────────────────────────────────────────── */
+/* ── Noise texture overlay ────────────────────────────────────────────────── */
+.bg-noise::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Card glows ──────────────────────────────────────────────────────────── */
 .card-glow {
   box-shadow:
-    0 0 0 1px rgba(139, 92, 246, 0.15),
-    0 8px 32px rgba(0, 0, 0, 0.5),
-    0 0 80px rgba(109, 40, 217, 0.06) inset;
+    0 0 0 1px rgba(139, 92, 246, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.6),
+    0 0 80px rgba(109, 40, 217, 0.05) inset;
 }
 
 .card-glow-green {
@@ -51,48 +58,73 @@ body {
     0 0 60px rgba(245, 158, 11, 0.05) inset;
 }
 
-/* ── Shimmer animation (button) ──────────────────────────────────────────── */
+.card-glow-violet {
+  box-shadow:
+    0 0 0 1px rgba(139, 92, 246, 0.25),
+    0 12px 40px rgba(0, 0, 0, 0.6),
+    0 0 120px rgba(109, 40, 217, 0.1) inset;
+}
+
+/* ── Hero glow orb ───────────────────────────────────────────────────────── */
+@keyframes orb-float {
+  0%, 100% { transform: translate(0, 0) scale(1);     opacity: 0.6; }
+  33%       { transform: translate(20px, -15px) scale(1.05); opacity: 0.8; }
+  66%       { transform: translate(-15px, 10px) scale(0.97); opacity: 0.5; }
+}
+
+.orb-violet {
+  animation: orb-float 8s ease-in-out infinite;
+}
+
+.orb-indigo {
+  animation: orb-float 11s ease-in-out infinite reverse;
+}
+
+.orb-cyan {
+  animation: orb-float 14s ease-in-out infinite 3s;
+}
+
+/* ── Shimmer button ──────────────────────────────────────────────────────── */
 @keyframes shimmer {
   0%   { background-position: -200% center; }
   100% { background-position:  200% center; }
 }
 
 .btn-shimmer {
-  background: linear-gradient(
-    105deg,
-    #6d28d9 0%,
-    #7c3aed 30%,
-    #a78bfa 50%,
-    #7c3aed 70%,
-    #6d28d9 100%
-  );
+  background: linear-gradient(105deg, #5b21b6 0%, #7c3aed 30%, #a78bfa 50%, #7c3aed 70%, #5b21b6 100%);
   background-size: 200% auto;
   animation: shimmer 3s linear infinite;
 }
 
-.btn-shimmer:hover {
-  animation-duration: 1.5s;
-}
+.btn-shimmer:hover { animation-duration: 1.5s; }
 
-/* ── Fade-in ─────────────────────────────────────────────────────────────── */
+/* ── Fade animations ─────────────────────────────────────────────────────── */
 @keyframes fade-up {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
 }
 
-.animate-fade-up {
-  animation: fade-up 0.3s ease-out both;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-/* ── Pulse glow (step icon) ──────────────────────────────────────────────── */
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+
+.animate-fade-up        { animation: fade-up         0.35s ease-out both; }
+.animate-fade-in        { animation: fade-in         0.25s ease-out both; }
+.animate-slide-in-right { animation: slide-in-right  0.3s  ease-out both; }
+
+/* ── Pulse glow ──────────────────────────────────────────────────────────── */
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.5); }
+  0%, 100% { box-shadow: 0 0 0 0   rgba(139, 92, 246, 0.5); }
   50%       { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0);  }
 }
 
-.pulse-glow {
-  animation: pulse-glow 1.5s ease-in-out infinite;
-}
+.pulse-glow { animation: pulse-glow 1.5s ease-in-out infinite; }
 
 /* ── Gradient text ───────────────────────────────────────────────────────── */
 .gradient-text {
@@ -102,7 +134,40 @@ body {
   background-clip: text;
 }
 
+.gradient-text-gold {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #fde68a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Beam / scanner line ─────────────────────────────────────────────────── */
+@keyframes beam-scan {
+  0%   { transform: translateY(-100%); opacity: 0;   }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.6; }
+  100% { transform: translateY(100%);  opacity: 0;   }
+}
+
+.beam-scan {
+  animation: beam-scan 3s ease-in-out infinite;
+}
+
+/* ── Step connector ──────────────────────────────────────────────────────── */
+@keyframes connector-fill {
+  from { height: 0; }
+  to   { height: 100%; }
+}
+
+/* ── Token badge float ───────────────────────────────────────────────────── */
+@keyframes token-float {
+  0%, 100% { transform: translateY(0);    }
+  50%       { transform: translateY(-4px); }
+}
+
+.token-float { animation: token-float 3s ease-in-out infinite; }
+
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar       { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(139, 92, 246, 0.3); border-radius: 2px; }

@@ -1,5 +1,6 @@
 import type { HardhatUserConfig } from "hardhat/config.js";
 import "@nomicfoundation/hardhat-viem";
+import "@nomicfoundation/hardhat-verify";
 
 const RPC     = process.env.ARB_SEPOLIA_RPC    ?? "https://sepolia-rollup.arbitrum.io/rpc";
 const PRIVKEY = process.env.DEPLOYER_PRIVATE_KEY;
@@ -7,7 +8,7 @@ const ARBSCAN = process.env.ARBISCAN_API_KEY   ?? "";
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.27",
+    version: "0.8.28",
     settings: {
       optimizer: { enabled: true, runs: 200 },
     },

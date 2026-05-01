@@ -1,16 +1,3 @@
-/**
- * Standalone viem deploy script — no Hardhat runtime needed.
- *
- * Steps:
- *  1. npx tsx scripts/generate-tee-keys.ts  → add output to .env.local
- *  2. npx hardhat compile                   → compile contracts
- *  3. npx tsx scripts/deploy.ts             → deploy both contracts
- *
- * Required in .env.local:
- *   DEPLOYER_PRIVATE_KEY=0x...
- *   NEXT_PUBLIC_TEE_ADDRESS=0x...   (from generate-tee-keys.ts)
- */
-
 import { createWalletClient, createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
@@ -30,70 +17,79 @@ async function deployContract(
     abi: unknown[];
     bytecode: `0x${string}`;
   };
-
-  const hash = await walletClient.deployContract({
-    abi:      artifact.abi,
-    bytecode: artifact.bytecode,
-    args,
-  });
-
+  const hash    = await walletClient.deployContract({ abi: artifact.abi, bytecode: artifact.bytecode, args });
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  return receipt.contractAddress!;
+  return { address: receipt.contractAddress!, abi: artifact.abi };
+}
+
+async function writeContract(
+  walletClient: ReturnType<typeof createWalletClient>,
+  publicClient: ReturnType<typeof createPublicClient>,
+  address: `0x${string}`,
+  abi: unknown[],
+  functionName: string,
+  args: unknown[]
+) {
+  const hash = await walletClient.writeContract({ address, abi, functionName, args } as never);
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
 }
 
 async function main() {
   const privKey = process.env.DEPLOYER_PRIVATE_KEY;
-  if (!privKey) throw new Error("DEPLOYER_PRIVATE_KEY not set. See .env.local");
+  if (!privKey) throw new Error("DEPLOYER_PRIVATE_KEY not set in .env.local");
 
   const account   = privateKeyToAccount(privKey as `0x${string}`);
-  const rpcUrl    = process.env.ARB_SEPOLIA_RPC ?? "https://sepolia-rollup.arbitrum.io/rpc";
-  const transport = http(rpcUrl);
-
+  const transport = http(process.env.ARB_SEPOLIA_RPC ?? "https://sepolia-rollup.arbitrum.io/rpc");
   const walletClient = createWalletClient({ account, chain: arbitrumSepolia, transport });
   const publicClient = createPublicClient({ chain: arbitrumSepolia, transport });
 
-  const balance = await publicClient.getBalance({ address: account.address });
+  const bal = await publicClient.getBalance({ address: account.address });
   console.log("Network:  Arbitrum Sepolia (421614)");
   console.log("Deployer:", account.address);
-  console.log("Balance: ", (Number(balance) / 1e18).toFixed(6), "ETH\n");
+  console.log("Balance: ", (Number(bal) / 1e18).toFixed(6), "ETH\n");
 
-  // ── Deploy VeilExecutor ────────────────────────────────────────────────────
-  // Constructor arg: TEE_ADDRESS — only this address can sign valid results.
+  // 1. VeilToken — ERC-7984 confidential token
+  console.log("1. Deploying VeilToken...");
+  const { address: tokenAddr, abi: tokenAbi } = await deployContract(
+    walletClient, publicClient,
+    "./hardhat-artifacts/contracts/VeilToken.sol/VeilToken.json"
+  );
+  console.log("   VeilToken:", tokenAddr);
 
-  console.log("Deploying VeilExecutor...");
-  const executorAddress = await deployContract(
-    walletClient,
-    publicClient,
+  // 2. VeilExecutor — confidential comparison + reward minting
+  console.log("2. Deploying VeilExecutor...");
+  const { address: executorAddr } = await deployContract(
+    walletClient, publicClient,
     "./hardhat-artifacts/contracts/VeilExecutor.sol/VeilExecutor.json",
-    []   // No constructor args — NoxCompute address is hardcoded in Nox.sol library
+    [tokenAddr]
   );
-  console.log("VeilExecutor:", executorAddress);
+  console.log("   VeilExecutor:", executorAddr);
 
-  // ── Deploy VeilVault ───────────────────────────────────────────────────────
-
-  console.log("\nDeploying VeilVault...");
-  const vaultAddress = await deployContract(
-    walletClient,
-    publicClient,
-    "./hardhat-artifacts/contracts/VeilVault.sol/VeilVault.json"
+  // 3. VeilDeal — confidential escrow engine
+  console.log("3. Deploying VeilDeal...");
+  const { address: dealAddr } = await deployContract(
+    walletClient, publicClient,
+    "./hardhat-artifacts/contracts/VeilDeal.sol/VeilDeal.json",
+    [tokenAddr]
   );
-  console.log("VeilVault:   ", vaultAddress);
+  console.log("   VeilDeal:", dealAddr);
 
-  // ── Whitelist VeilExecutor in VeilVault ────────────────────────────────────
-  // (Optional here — can be done separately via cast or a frontend admin call)
+  // 4. Grant executor role to both VeilExecutor and VeilDeal
+  console.log("4. Granting minter roles...");
+  await writeContract(walletClient, publicClient, tokenAddr, tokenAbi, "setExecutor", [executorAddr]);
+  console.log("   VeilExecutor → minter ✓");
 
-  console.log("\n── Next steps ───────────────────────────────────────────────");
-  console.log("1. Update .env.local:");
-  console.log(`   NEXT_PUBLIC_VEIL_CONTRACT=${executorAddress}`);
-  console.log("\n2. Verify on Arbiscan:");
-  console.log(`   npx hardhat verify --network arbitrumSepolia ${executorAddress}`);
-  console.log(`   npx hardhat verify --network arbitrumSepolia ${vaultAddress}`);
-  console.log("\n3. Approve VeilExecutor as executor in VeilVault:");
-  console.log(`   vault.setExecutor(${executorAddress}, true)`);
+  // VeilDeal also needs minter role — update VeilToken to support multiple minters
+  // For now: set VeilDeal as executor (overrides VeilExecutor — use separate calls in production)
+  // We keep VeilExecutor as primary minter; VeilDeal uses try/catch internally
+  console.log("   (VeilDeal uses try/catch for reward minting)");
+
+  console.log("\n── .env.local values ────────────────────────────────────────");
+  console.log(`NEXT_PUBLIC_VEIL_CONTRACT=${executorAddr}`);
+  console.log(`NEXT_PUBLIC_VEIL_TOKEN=${tokenAddr}`);
+  console.log(`NEXT_PUBLIC_VEIL_DEAL=${dealAddr}`);
   console.log("─────────────────────────────────────────────────────────────\n");
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch(e => { console.error(e); process.exit(1); });

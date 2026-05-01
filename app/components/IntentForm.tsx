@@ -200,6 +200,7 @@ export function IntentForm() {
   const [explanation, setExplanation] = useState<string | null>(null);
   const [txHash, setTxHash]   = useState<string | null>(null);
   const [error, setError]     = useState<string | null>(null);
+  const [veilEarned, setVeilEarned] = useState(false);
 
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
@@ -238,6 +239,7 @@ export function IntentForm() {
     setExecResult(null);
     setExplanation(null);
     setTxHash(null);
+    setVeilEarned(false);
     setPipeline(IDLE_PIPELINE);
     setOverallStatus("running");
 
@@ -274,9 +276,10 @@ export function IntentForm() {
       setTxHash(result.txHash);
       setStep("evaluate", "done");
 
-      // ── Step 4: Record + explanation ────────────────────────────────────
+      // ── Step 4: Record + explanation + VEIL reward ─────────────────────
       setStep("execute", "done");
       setOverallStatus(result.execute ? "executed" : "held");
+      setVeilEarned(true);
 
       const condMatch = parsedData.condition.match(/price\s*([<>])\s*(\d+(?:\.\d+)?)/);
       setExplanation(generateExplanation({
@@ -545,6 +548,22 @@ export function IntentForm() {
               <div className="rounded-lg border border-white/[0.05] bg-black/20 px-3 py-2.5">
                 <p className="mb-1 text-[10px] text-zinc-700 uppercase tracking-widest font-medium">Why</p>
                 <p className="text-sm leading-relaxed text-zinc-400">{explanation}</p>
+              </div>
+            )}
+
+            {/* VEIL reward notification */}
+            {veilEarned && (
+              <div className="animate-slide-in-right flex items-center gap-3 rounded-xl border border-violet-500/20 bg-violet-500/[0.07] px-4 py-3">
+                <div className="token-float flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-violet-500/30 bg-violet-500/15 text-violet-300">
+                  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <circle cx="8" cy="8" r="6"/>
+                    <path d="M5.5 8h5M8 5.5v5"/>
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-violet-200">+1 VEIL earned</p>
+                  <p className="text-xs text-violet-500">Minted to your wallet · ERC-7984 confidential token</p>
+                </div>
               </div>
             )}
 
