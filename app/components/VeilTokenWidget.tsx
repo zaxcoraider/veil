@@ -57,7 +57,8 @@ export function VeilTokenWidget({ onBalanceUpdate }: { onBalanceUpdate?: (bal: s
     // Hints shown after 4s and 10s to indicate gateway sync wait
     const hints = [
       { delay: 4000,  text: "Waiting for gateway…" },
-      { delay: 10000, text: "Almost there…" },
+      { delay: 15000, text: "Gateway indexing ACL (~30s)…" },
+      { delay: 35000, text: "Almost there…" },
     ];
     const timers = hints.map(({ delay, text }) =>
       setTimeout(() => setDecryptHint(text), delay)

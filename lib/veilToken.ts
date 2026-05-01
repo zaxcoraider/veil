@@ -56,7 +56,7 @@ export async function decryptVeilBalance(
   // The Nox gateway indexes ACL entries ~15s after tx confirms.
   // Retry every 3s for up to 30s so we succeed as soon as it's ready.
   let lastError: unknown;
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 20; i++) {
     if (i > 0) await new Promise<void>(r => setTimeout(r, 3000));
     try {
       const { value } = await handleClient.decrypt(handle);
