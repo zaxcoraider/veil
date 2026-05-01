@@ -100,6 +100,11 @@ export function DealForm() {
     if (isWrongNetwork) { switchChain({ chainId: arbitrumSepolia.id }); return; }
     if (!DEAL_ADDRESS || !TOKEN_ADDRESS) { setError("Contract addresses not configured"); return; }
 
+    if (counterparty.toLowerCase() === address?.toLowerCase()) {
+      setError("Counterparty cannot be your own address — the contract rejects self-deals.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setResult(null);
@@ -253,12 +258,7 @@ export function DealForm() {
               required disabled={loading || step === "done" || step === "settled"}
               className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 font-mono text-sm text-white placeholder-zinc-700 outline-none transition-all focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 disabled:opacity-40"
             />
-            {address && (
-              <button type="button" onClick={() => setCounterparty(address)}
-                className="self-start text-[11px] text-zinc-600 underline underline-offset-2 hover:text-zinc-400">
-                Use my address (self-demo)
-              </button>
-            )}
+            <p className="text-[11px] text-zinc-700">Must be a different address — the contract rejects self-deals</p>
           </div>
 
           {/* CTA */}

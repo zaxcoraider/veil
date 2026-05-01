@@ -166,29 +166,45 @@ export async function createDeal(
 
   const checkLt = params.condition.includes("<") || !params.condition.includes(">");
 
-  // 4. Submit on-chain
+  const callArgs = [
+    amountHandle    as `0x${string}`,
+    amountProof     as `0x${string}`,
+    thresholdHandle as `0x${string}`,
+    thresholdProof  as `0x${string}`,
+    params.counterparty,
+    BigInt(price),
+    checkLt,
+  ] as const;
+
+  // 4. Simulate first to surface the exact revert reason before paying gas
+  try {
+    await publicClient.simulateContract({
+      address:      params.contractAddress,
+      abi:          VEIL_DEAL_ABI,
+      functionName: "createDeal",
+      args:         callArgs,
+      account:      walletClient.account ?? undefined,
+    });
+  } catch (simErr) {
+    const msg = simErr instanceof Error ? simErr.message : String(simErr);
+    throw new Error(`Simulation failed: ${msg}`);
+  }
+
+  // 5. Submit on-chain
   const txHash = await walletClient.writeContract({
     chain:        walletClient.chain   ?? null,
     account:      walletClient.account ?? null,
     address:      params.contractAddress,
     abi:          VEIL_DEAL_ABI,
     functionName: "createDeal",
-    args: [
-      amountHandle    as `0x${string}`,
-      amountProof     as `0x${string}`,
-      thresholdHandle as `0x${string}`,
-      thresholdProof  as `0x${string}`,
-      params.counterparty,
-      BigInt(price),
-      checkLt,
-    ],
+    args:         callArgs,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
 
   if (receipt.status === "reverted") {
     throw new Error(
-      "Transaction reverted. Make sure you have claimed VEIL from the faucet and the deal contract is approved as operator."
+      "Transaction reverted on-chain after simulation passed — check Arbiscan for details."
     );
   }
 
