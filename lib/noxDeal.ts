@@ -184,22 +184,22 @@ export async function createDeal(
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
 
-  // 5. Parse dealId + resultHandle from DealCreated event
-  let dealId: bigint | undefined;
-  let resultHandle: `0x${string}` | undefined;
-
-  for (const log of receipt.logs) {
-    try {
-      const decoded = decodeEventLog({ abi: VEIL_DEAL_ABI, data: log.data, topics: log.topics });
-      if (decoded.eventName === "DealCreated") {
-        dealId = (decoded.args as { dealId: bigint }).dealId;
-      }
-    } catch { /* skip */ }
+  if (receipt.status === "reverted") {
+    throw new Error(
+      "Transaction reverted. Make sure you have claimed VEIL from the faucet and the deal contract is approved as operator."
+    );
   }
 
-  if (dealId === undefined) throw new Error("DealCreated event not found");
+  // 5. Get dealId from dealCount (most reliable — avoids event parsing issues)
+  const dealCount = await publicClient.readContract({
+    address:      params.contractAddress,
+    abi:          VEIL_DEAL_ABI,
+    functionName: "dealCount",
+  }) as bigint;
 
-  // Get resultHandle from getDeal
+  const dealId: bigint = dealCount - 1n;
+
+  // 6. Get resultHandle from getDeal
   const deal = await publicClient.readContract({
     address:      params.contractAddress,
     abi:          VEIL_DEAL_ABI,
@@ -207,7 +207,7 @@ export async function createDeal(
     args:         [dealId],
   }) as { resultHandle: `0x${string}` };
 
-  resultHandle = deal.resultHandle;
+  const resultHandle: `0x${string}` = deal.resultHandle;
 
   // 6. Poll TEE for result
   let execute: boolean | undefined;
