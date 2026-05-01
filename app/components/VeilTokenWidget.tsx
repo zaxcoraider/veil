@@ -58,8 +58,10 @@ export function VeilTokenWidget({ onBalanceUpdate }: { onBalanceUpdate?: (bal: s
       setBalance(formatted);
       setState("revealed");
       onBalanceUpdate?.(formatted);
-    } catch {
-      setError("Signature required to decrypt");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[VeilTokenWidget] decrypt failed:", e);
+      setError(msg.length > 80 ? msg.slice(0, 80) + "…" : msg);
       setState("encrypted");
     }
   }
@@ -108,9 +110,9 @@ export function VeilTokenWidget({ onBalanceUpdate }: { onBalanceUpdate?: (bal: s
           </button>
         )}
         {state === "decrypting" && (
-          <span className="flex items-center gap-1 text-xs text-violet-400">
+          <span className="flex items-center gap-1 text-xs text-violet-400" title="Check MetaMask — approve the signature request to decrypt">
             <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-500/30 border-t-violet-400" />
-            Signing…
+            Sign in wallet…
           </span>
         )}
         {state === "revealed" && balance !== null && (
