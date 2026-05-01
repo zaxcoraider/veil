@@ -136,7 +136,8 @@ export function DealForm() {
 
       const condMatch = intent.match(/(\d+(?:\.\d+)?)/);
       const threshold = condMatch ? parseFloat(condMatch[1]) : 0;
-      const operator  = intent.includes("<") ? "<" : ">";
+      const isLt      = intent.includes("<") || /below|under|less/i.test(intent);
+      const operator  = isLt ? "<" : ">";
       setExplanation(generateExplanation({
         action:    "buy",
         asset:     "ETH",

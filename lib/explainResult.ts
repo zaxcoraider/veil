@@ -31,7 +31,7 @@ export function generateExplanation(input: ExplainInput): string {
 
   return (
     `Trade held — ${asset} price (${fmt(price)}) ${waiting} ` +
-    `your ${fmt(threshold)} threshold yet. ` +
-    `The TEE will re-evaluate when conditions change.`
+    `your ${fmt(threshold)} threshold. ` +
+    `TEE result is final — settle to return your VEIL.`
   );
 }
